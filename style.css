@@ -57,6 +57,13 @@
   display: none !important;
 }
 
+/* Réserve toujours la place de la barre de défilement : sinon, en passant d'une
+   page courte à une page longue, tout se décale de quelques pixels. */
+html {
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+}
+
 html,
 body {
   margin: 0;
