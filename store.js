@@ -10,6 +10,14 @@
   const LOCAL_KEY = 'budg-local-v1';
   const CACHE_KEY = 'budg-cloud-cache-v1';
   const MODE_KEY = 'budg-mode';
+  const OUTBOX_KEY = 'budg-outbox-v1';
+
+  // Erreur due à l'absence de réseau (et non à un refus du serveur).
+  function isNetworkError(e) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+    const msg = (e && (e.message || e.details || e.name)) || String(e);
+    return /Failed to fetch|NetworkError|Load failed|fetch failed|AuthRetryableFetchError|Network request failed/i.test(msg);
+  }
 
   const DEFAULT_CATEGORIES = [
     ['Courses', '🛒', 40000],
@@ -212,6 +220,9 @@
     listeners: [],
     partnerListeners: [],
     knownIds: null, // ids déjà vus, pour repérer ce que l'autre vient d'ajouter
+    offline: false, // dernière tentative réseau échouée
+    outbox: readJSON(OUTBOX_KEY) || [], // modifications faites hors ligne, à envoyer
+    flushing: false,
 
     cloudConfigured() {
       const c = window.BUDG_CONFIG || {};
@@ -229,7 +240,16 @@
 
     emit() {
       if (this.mode === 'local') writeJSON(LOCAL_KEY, this.state);
-      if (this.mode === 'cloud') writeJSON(CACHE_KEY, { householdId: this.householdId, state: this.state });
+      if (this.mode === 'cloud' && this.householdId) {
+        writeJSON(CACHE_KEY, {
+          householdId: this.householdId,
+          me: this.me,
+          user: this.user && { id: this.user.id, email: this.user.email },
+          inviteCode: this.inviteCode,
+          partnerJoined: this.partnerJoined,
+          state: this.state,
+        });
+      }
       this.listeners.forEach((fn) => fn());
     },
 
@@ -247,10 +267,29 @@
       const { supabaseUrl, supabaseKey } = window.BUDG_CONFIG;
       this.client = window.supabase.createClient(supabaseUrl, supabaseKey);
       this.mode = 'cloud';
-      const { data } = await this.client.auth.getSession();
-      if (!data.session) return 'auth';
+      window.addEventListener('online', () => this.sync());
+      const { data, error } = await this.client.auth.getSession();
+      if (!data.session) {
+        // Hors ligne avec une session à rafraîchir : on ouvre les données en cache.
+        const cache = readJSON(CACHE_KEY);
+        if (error && isNetworkError(error) && cache && cache.user) return this.useCache(cache);
+        return 'auth';
+      }
       this.user = data.session.user;
       return this.loadHousehold();
+    },
+
+    // Ouvre la dernière copie connue des données (hors ligne).
+    useCache(cache) {
+      this.householdId = cache.householdId;
+      this.me = cache.me;
+      this.user = this.user || cache.user;
+      this.inviteCode = cache.inviteCode;
+      this.partnerJoined = cache.partnerJoined;
+      this.state = { recurringTransfers: [], carUsage: {}, shopping: [], ...cache.state };
+      this.offline = true;
+      this.subscribe();
+      return 'ready';
     },
 
     useLocal(nameA, nameB, defaultSplit) {
@@ -289,6 +328,7 @@
       if (this.channel) await this.client.removeChannel(this.channel);
       await this.client.auth.signOut();
       localStorage.removeItem(CACHE_KEY);
+      localStorage.removeItem(OUTBOX_KEY);
       location.reload();
     },
 
@@ -300,7 +340,11 @@
         .select('household_id, person')
         .eq('user_id', this.user.id)
         .maybeSingle();
-      if (error) throw error;
+      if (error) {
+        const cache = readJSON(CACHE_KEY);
+        if (isNetworkError(error) && cache && cache.householdId) return this.useCache(cache);
+        throw error;
+      }
       if (!data) return 'household';
       this.householdId = data.household_id;
       this.me = data.person;
@@ -309,8 +353,13 @@
       if (cache && cache.householdId === this.householdId) {
         this.state = { recurringTransfers: [], carUsage: {}, shopping: [], ...cache.state };
       }
-      await this.fetchAll();
       this.subscribe();
+      try {
+        await this.sync();
+      } catch (e) {
+        if (!(isNetworkError(e) && this.state)) throw e;
+        this.offline = true;
+      }
       return 'ready';
     },
 
@@ -366,8 +415,123 @@
         carUsage: Object.fromEntries(usage.data.map((u) => [u.month, u.split])),
         shopping: shop.data.map(TABLES.shopping.fromRow),
       };
+      // Ce qui n'est pas encore parti reste visible.
+      for (const op of this.outbox) this.applyOp(op);
+      this.offline = false;
       this.detectPartnerActivity();
       this.emit();
+    },
+
+    // ---------- Hors ligne : file d'attente des modifications ----------
+
+    // Envoie ce qui est en attente puis recharge tout.
+    async sync() {
+      await this.flush();
+      try {
+        await this.fetchAll();
+      } catch (e) {
+        if (isNetworkError(e)) {
+          this.offline = true;
+          this.emit();
+        }
+        throw e;
+      }
+    },
+
+    // Exécute une opération sur Supabase ; renvoie l'erreur éventuelle.
+    async runOp(op) {
+      try {
+        const hid = this.householdId;
+        let res;
+        if (op.type === 'upsert') {
+          res = await this.client.from(TABLES[op.kind].table).upsert({ ...TABLES[op.kind].toRow(op.item), household_id: hid });
+        } else if (op.type === 'delete') {
+          res = await this.client.from(TABLES[op.kind].table).delete().eq('id', op.id);
+        } else if (op.type === 'carUsage') {
+          const table = this.client.from('budg_car_usage');
+          res =
+            op.split == null
+              ? await table.delete().eq('household_id', hid).eq('month', op.month)
+              : await table.upsert({ household_id: hid, month: op.month, split: op.split });
+        } else if (op.type === 'settings') {
+          res = await this.client
+            .from('budg_households')
+            .update({ name_a: op.nameA, name_b: op.nameB, default_split: op.defaultSplit })
+            .eq('id', hid);
+        }
+        return res && res.error;
+      } catch (e) {
+        return e;
+      }
+    },
+
+    // Rejoue une opération sur l'état en mémoire.
+    applyOp(op) {
+      const st = this.state;
+      if (op.type === 'upsert') {
+        const list = st[op.kind];
+        const i = list.findIndex((x) => x.id === op.item.id);
+        if (i >= 0) list[i] = op.item;
+        else list.push(op.item);
+      } else if (op.type === 'delete') {
+        st[op.kind] = st[op.kind].filter((x) => x.id !== op.id);
+      } else if (op.type === 'carUsage') {
+        if (op.split == null) delete st.carUsage[op.month];
+        else st.carUsage[op.month] = op.split;
+      } else if (op.type === 'settings') {
+        st.people[0].name = op.nameA;
+        st.people[1].name = op.nameB;
+        st.defaultSplit = op.defaultSplit;
+      }
+    },
+
+    queue(op) {
+      this.outbox.push(op);
+      writeJSON(OUTBOX_KEY, this.outbox);
+      this.emit();
+    },
+
+    async flush() {
+      if (this.flushing || !this.outbox.length || this.mode !== 'cloud') return;
+      this.flushing = true;
+      try {
+        while (this.outbox.length) {
+          const error = await this.runOp(this.outbox[0]);
+          if (error && isNetworkError(error)) {
+            this.offline = true;
+            break;
+          }
+          // Refus du serveur (règle, contrainte) : on abandonne cette opération.
+          if (error) console.error('Modification hors ligne refusée', error, this.outbox[0]);
+          this.outbox.shift();
+          writeJSON(OUTBOX_KEY, this.outbox);
+        }
+      } finally {
+        this.flushing = false;
+        this.emit();
+      }
+    },
+
+    // Envoie une modification, ou la met en attente si le réseau manque.
+    // `rollback` annule le changement local si le serveur la refuse.
+    async write(op, rollback) {
+      if (this.mode !== 'cloud') return;
+      // On garde l'ordre : s'il y a déjà des modifications en attente, on passe après.
+      if (this.outbox.length) {
+        this.queue(op);
+        this.flush();
+        return;
+      }
+      const error = await this.runOp(op);
+      if (!error) return;
+      if (isNetworkError(error)) {
+        this.offline = true;
+        this.queue(op);
+        return;
+      }
+      rollback();
+      this.emit();
+      throw error;
     },
 
     detectPartnerActivity() {
@@ -453,7 +617,7 @@
       let timer = null;
       const refresh = () => {
         clearTimeout(timer);
-        timer = setTimeout(() => this.fetchAll().catch((e) => console.error(e)), 300);
+        timer = setTimeout(() => this.sync().catch((e) => console.error(e)), 300);
       };
       let channel = this.client.channel(`budg-${hid}`);
       for (const { table } of Object.values(TABLES)) {
@@ -494,17 +658,10 @@
       if (i >= 0) list[i] = item;
       else list.push(item);
       this.emit();
-      if (this.mode !== 'cloud') return;
-      const { toRow, table } = TABLES[kind];
-      const { error } = await this.client
-        .from(table)
-        .upsert({ ...toRow(item), household_id: this.householdId });
-      if (error) {
+      await this.write({ type: 'upsert', kind, item }, () => {
         if (previous) list[list.indexOf(item)] = previous;
         else list.splice(list.indexOf(item), 1);
-        this.emit();
-        throw error;
-      }
+      });
     },
 
     async remove(kind, id) {
@@ -518,13 +675,7 @@
         for (const r of this.state.recurring) if (r.categoryId === id) r.categoryId = null;
       }
       this.emit();
-      if (this.mode !== 'cloud') return;
-      const { error } = await this.client.from(TABLES[kind].table).delete().eq('id', id);
-      if (error) {
-        list.splice(i, 0, removed);
-        this.emit();
-        throw error;
-      }
+      await this.write({ type: 'delete', kind, id }, () => list.splice(i, 0, removed));
     },
 
     // Usage de la voiture d'un mois (null = revenir à la valeur héritée).
@@ -534,18 +685,10 @@
       if (split == null) delete usage[month];
       else usage[month] = split;
       this.emit();
-      if (this.mode !== 'cloud') return;
-      const table = this.client.from('budg_car_usage');
-      const { error } =
-        split == null
-          ? await table.delete().eq('household_id', this.householdId).eq('month', month)
-          : await table.upsert({ household_id: this.householdId, month, split });
-      if (error) {
+      await this.write({ type: 'carUsage', month, split }, () => {
         if (previous == null) delete usage[month];
         else usage[month] = previous;
-        this.emit();
-        throw error;
-      }
+      });
     },
 
     async updateSettings({ nameA, nameB, defaultSplit }) {
@@ -553,15 +696,7 @@
       this.state.people[1].name = nameB;
       this.state.defaultSplit = defaultSplit;
       this.emit();
-      if (this.mode !== 'cloud') return;
-      const { error } = await this.client
-        .from('budg_households')
-        .update({ name_a: nameA, name_b: nameB, default_split: defaultSplit })
-        .eq('id', this.householdId);
-      if (error) {
-        await this.fetchAll();
-        throw error;
-      }
+      await this.write({ type: 'settings', nameA, nameB, defaultSplit }, () => this.fetchAll().catch(() => {}));
     },
 
     // Import d'une sauvegarde JSON (mode local) ou envoi vers le cloud.

@@ -1937,9 +1937,28 @@
         }
       }
     }
+    showSyncBanner();
     fillNotifCard();
     showNotifSuggestion();
   }
+
+  // Bandeau « hors ligne » / « envoi en cours » en haut de la page.
+  function showSyncBanner() {
+    if (S.mode !== 'cloud') return;
+    const pending = S.outbox.length;
+    const offline = S.offline || navigator.onLine === false;
+    if (!offline && !pending) return;
+    const waiting = pending ? `${pending} modification${pending > 1 ? 's' : ''} en attente d'envoi.` : '';
+    const text = offline
+      ? `<strong>📴 Hors ligne</strong> Données de la dernière synchro. ${waiting || 'Vos ajouts seront envoyés au retour du réseau.'}`
+      : `<strong>⏳ Envoi en cours…</strong> ${waiting}`;
+    view.insertAdjacentHTML('afterbegin', `<div class="sync-banner ${offline ? 'off' : ''}">${text}</div>`);
+  }
+
+  window.addEventListener('offline', () => {
+    S.offline = true;
+    render();
+  });
 
   function go(step) {
     ui.step = step;
