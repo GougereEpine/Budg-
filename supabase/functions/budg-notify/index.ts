@@ -151,9 +151,17 @@ Deno.serve(async (req) => {
       .from('budg_push_subscriptions')
       .select('id, endpoint, p256dh, auth')
       .eq('user_id', auth.user.id);
+    // Prénom de l'autre membre du couple, pour le message.
+    const { data: member } = await supabase
+      .from('budg_members')
+      .select('person, budg_households(name_a, name_b)')
+      .eq('user_id', auth.user.id)
+      .maybeSingle();
+    const house = (member?.budg_households || {}) as { name_a?: string; name_b?: string };
+    const partner = (member?.person === 'a' ? house.name_b : house.name_a) || 'l’autre';
     const sent = await sendTo(subs || [], {
       title: '🔔 Notifications Budg’ activées',
-      body: 'Vous serez prévenu(e) quand votre moitié ajoute une dépense.',
+      body: `Une notif arrivera dès que ${partner} ajoute une dépense.`,
       url: './',
       tag: 'budg-test',
     });

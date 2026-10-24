@@ -1857,9 +1857,14 @@
 
   // ---------- Notifications push ----------
 
+  // Textes liés aux notifications, avec le prénom de l'autre.
   const NOTIF_TEXT = {
-    on: '✅ Activées sur cet appareil : vous serez prévenu(e) quand votre moitié ajoute une dépense ou un remboursement.',
-    off: 'Recevez une notification quand votre moitié ajoute une dépense ou un remboursement, même appli fermée.',
+    get on() {
+      return `✅ Activées sur cet appareil : une notif dès que ${name(other(me()))} ajoute une dépense ou un remboursement.`;
+    },
+    get off() {
+      return `Une notif dès que ${name(other(me()))} ajoute une dépense ou un remboursement, même appli fermée.`;
+    },
     denied: "Les notifications sont bloquées pour ce site : autorisez-les dans les réglages du navigateur, puis revenez ici.",
     'ios-install': "Sur iPhone, ajoutez d'abord Budg' à l'écran d'accueil (Partager → Sur l'écran d'accueil), puis ouvrez-le depuis l'icône pour activer les notifications.",
     unsupported: "Ce navigateur ne gère pas les notifications push.",
@@ -1882,8 +1887,8 @@
   function notifSuggestion() {
     if (S.mode !== 'cloud' || readPref('budg-notif-hint') === 'hidden') return '';
     return `<div class="alert trend" id="notif-hint" hidden><span class="ico">🔔</span><div>
-      <strong>Être prévenu(e) des dépenses de ${esc(name(other(me())))}</strong>
-      <span data-hint-text>Une notification à chaque nouvelle dépense, même appli fermée.</span>
+      <strong>Les dépenses de ${esc(name(other(me())))} en direct</strong>
+      <span data-hint-text>Une notif dès que ${esc(name(other(me())))} ajoute une dépense, même appli fermée.</span>
       <div style="margin-top:8px;display:flex;gap:8px"><button class="btn primary" data-notif="on">Activer</button><button class="btn" data-notif="dismiss">Plus tard</button></div>
     </div></div>`;
   }
