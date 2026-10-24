@@ -346,7 +346,13 @@
       projectedTotal,
       prevAverage,
       vsAverage: prevAverage ? Math.round(((summary.total - prevAverage) / prevAverage) * 100) : null,
-      history: [...prevSummaries].reverse().concat([summary]).map((s) => ({ month: s.month, total: s.total })),
+      history: [...prevSummaries]
+        .reverse()
+        .concat([summary])
+        .map((s) => {
+          const fixedSum = s.expenses.filter((e) => e.recurringId).reduce((sum, e) => sum + e.amount, 0);
+          return { month: s.month, total: s.total, fixed: fixedSum, variable: s.total - fixedSum };
+        }),
     };
   }
 

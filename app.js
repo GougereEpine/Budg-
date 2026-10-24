@@ -1323,16 +1323,24 @@
         </div>`;
     };
 
-    const max = Math.max(1, an.budgetTotal, ...an.history.map((h) => h.total));
+    // Barres empilées : charges fixes en bas, dépenses ponctuelles au-dessus.
+    // « Masquer les fixes » (même réglage que l'onglet Dépenses) ne garde que les ponctuelles.
+    const shown = (h) => (ui.hideFixed ? h.variable : h.total);
+    const max = Math.max(1, ...an.history.map(shown));
     const historyHtml = an.history
-      .map(
-        (h) => `
-        <div class="col ${h.month === ui.month ? 'current' : ''}">
-          <span class="val num">${h.total ? euro(Math.round(h.total / 100) * 100) : ''}</span>
-          <div class="stick" style="height:${(h.total / max) * 100}%"></div>
+      .map((h) => {
+        const fixedPart = ui.hideFixed ? 0 : h.fixed;
+        const title = `${monthLabel(h.month)} : ${euro(h.variable)} ponctuelles${ui.hideFixed ? '' : ` + ${euro(h.fixed)} fixes`}`;
+        return `
+        <div class="col ${h.month === ui.month ? 'current' : ''}" title="${esc(title)}">
+          <span class="val num">${shown(h) ? euro(Math.round(shown(h) / 100) * 100) : ''}</span>
+          <div class="stack" style="height:${(shown(h) / max) * 100}%">
+            ${h.variable ? `<div class="seg-var" style="flex:${h.variable}"></div>` : ''}
+            ${fixedPart ? `<div class="seg-fixed" style="flex:${fixedPart}"></div>` : ''}
+          </div>
           <span class="m">${monthLabel(h.month, true)}</span>
-        </div>`
-      )
+        </div>`;
+      })
       .join('');
 
     const delta =
@@ -1370,7 +1378,16 @@
       ${unbudgeted.length ? `<h2>Dépenses sans budget</h2><div class="card" style="padding-top:4px;padding-bottom:4px">${unbudgeted.map(row).join('')}</div>` : ''}
 
       <h2>Évolution</h2>
-      <div class="card"><div class="history">${historyHtml}</div></div>
+      <div class="card">
+        <div class="list-head" style="margin:0 0 8px">
+          <div class="legend" style="justify-content:flex-start;gap:14px">
+            <span><i class="dot" style="background:var(--accent)"></i>Ponctuelles</span>
+            ${ui.hideFixed ? '' : '<span><i class="dot" style="background:var(--fixed)"></i>Charges fixes</span>'}
+          </div>
+          <button class="chip ${ui.hideFixed ? 'active' : ''}" data-hide-fixed aria-pressed="${ui.hideFixed}">🔁 ${ui.hideFixed ? 'Fixes masquées' : 'Masquer les fixes'}</button>
+        </div>
+        <div class="history">${historyHtml}</div>
+      </div>
 
       <h2>Qui paie quoi</h2>
       <div class="card">
@@ -1378,6 +1395,11 @@
       </div>`;
 
     bindCarCard(ui.month);
+    view.querySelector('[data-hide-fixed]').onclick = () => {
+      ui.hideFixed = !ui.hideFixed;
+      writePref('budg-hide-fixed', ui.hideFixed ? '1' : '0');
+      render();
+    };
 
     view.querySelector('[data-edit-budgets]').onclick = () => {
       ui.tab = 'settings';

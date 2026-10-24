@@ -17,6 +17,7 @@
   --warn-soft: #fdf1d8;
   --over: #d93a3a;
   --over-soft: #fde3e3;
+  --fixed: #a99ba3;
   --radius: 16px;
   --shadow: 0 1px 2px rgba(43, 34, 40, 0.06), 0 4px 16px rgba(43, 34, 40, 0.05);
   color-scheme: light;
@@ -42,6 +43,7 @@
     --warn-soft: #3a2f16;
     --over: #ff6464;
     --over-soft: #3e1d1f;
+    --fixed: #7d6f78;
     --shadow: none;
     color-scheme: dark;
   }
@@ -376,16 +378,35 @@ h2 {
   min-width: 0;
 }
 
-.history .stick {
+.history .stack {
   width: 100%;
   max-width: 48px;
-  border-radius: 8px 8px 4px 4px;
-  background: var(--accent-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-height: 2px;
+  opacity: 0.45;
 }
 
-.history .col.current .stick {
+.history .col.current .stack {
+  opacity: 1;
+}
+
+.history .seg-var {
   background: var(--accent);
+  border-radius: 8px 8px 3px 3px;
+  min-height: 3px;
+}
+
+.history .seg-fixed {
+  background: var(--fixed);
+  border-radius: 3px 3px 4px 4px;
+  min-height: 3px;
+}
+
+.history .seg-var:only-child,
+.history .seg-fixed:only-child {
+  border-radius: 8px 8px 4px 4px;
 }
 
 .history .val {
@@ -928,4 +949,12 @@ dialog::backdrop {
 
 .list-head p {
   margin: 0;
+}
+
+.legend span {
+  white-space: nowrap;
+}
+
+.list-head {
+  flex-wrap: wrap;
 }
