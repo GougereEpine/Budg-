@@ -1170,11 +1170,20 @@
     const rtList = [...state.recurringTransfers].sort((x, y) => (x.startMonth < y.startMonth ? -1 : 1));
     const diffA = rs.paid.a - rs.share.a;
     const debtor = diffA > 0 ? 'b' : 'a';
-    const covering = rtList.find((r) => isActive(r) && r.auto && r.from === debtor);
+    // Ce que la personne qui doit rembourse déjà chaque mois via les remboursements auto.
+    const debt = L.fixedChargesDebt(state, cur, debtor);
+    const reimbursed = rtList
+      .filter((r) => isActive(r) && r.from === debtor)
+      .reduce((sum, r) => sum + (r.auto ? debt : r.amount), 0);
+    const gap = reimbursed - debt;
     let balanceText = '';
     if (rs.total && diffA === 0) balanceText = 'Les charges fixes sont parfaitement équilibrées entre vous.';
-    else if (rs.total && covering) {
-      balanceText = `${esc(name(debtor))} rembourse automatiquement sa part (<b>${euro(Math.abs(diffA))}</b>) le ${covering.day} du mois. ✅`;
+    else if (rs.total && reimbursed && gap === 0) {
+      balanceText = `✅ ${esc(name(debtor))} rembourse chaque mois exactement sa part : <b>${euro(debt)}</b>.`;
+    } else if (rs.total && reimbursed && gap > 0) {
+      balanceText = `ℹ️ ${esc(name(debtor))} rembourse <b>${euro(reimbursed)}</b> par mois pour une part de <b>${euro(debt)}</b> : <b>${euro(gap)} de plus</b> chaque mois, compté dans le solde en sa faveur. Pour qu'il suive les charges, passez le remboursement en « Sa part des charges fixes ».`;
+    } else if (rs.total && reimbursed && gap < 0) {
+      balanceText = `⚠️ ${esc(name(debtor))} rembourse <b>${euro(reimbursed)}</b> par mois pour une part de <b>${euro(debt)}</b> : il manque <b>${euro(-gap)}</b> chaque mois (compté dans le solde). Pour qu'il suive les charges, passez le remboursement en « Sa part des charges fixes ».`;
     } else if (rs.total) {
       balanceText = `Chaque mois, ${esc(name(other(debtor)))} avance <b>${euro(Math.abs(diffA))}</b> de plus que sa part : c'est compté dans le solde. Ajoutez un remboursement automatique si ${esc(name(debtor))} fait un virement permanent.`;
     }
@@ -1187,7 +1196,7 @@
           <div class="emoji">💸</div>
           <div class="body">
             <div class="title">${esc(name(r.from))} → ${esc(name(r.to))}</div>
-            <div class="sub">${r.auto ? 'Sa part des charges fixes' : 'Montant fixe'} · ${esc(when)}${r.note ? ' · ' + esc(r.note) : ''}</div>
+            <div class="sub">${r.auto ? 'Sa part des charges fixes' : `Montant fixe (sa part : ${euro(L.fixedChargesDebt(state, cur, r.from))})`} · ${esc(when)}${r.note ? ' · ' + esc(r.note) : ''}</div>
           </div>
           <div class="right"><div class="amt num">${euro(amount)}<span class="small muted">/mois</span></div></div>
         </div>`;
