@@ -211,6 +211,21 @@
     return { active, total, paid, share };
   }
 
+  // Qui a réellement financé le mois : dépenses payées directement, plus les
+  // virements donnés, moins les virements reçus (remboursements auto compris).
+  function monthContributions(state, month) {
+    const summary = monthSummary(state, month);
+    const given = { a: 0, b: 0 };
+    for (const t of allTransfers(state, month)) {
+      if (monthKey(t.date) === month) given[t.from] += t.amount;
+    }
+    const funded = {
+      a: summary.paid.a + given.a - given.b,
+      b: summary.paid.b + given.b - given.a,
+    };
+    return { paid: summary.paid, given, funded, share: summary.share, diffA: funded.a - summary.share.a };
+  }
+
   // Dépenses du mois réparties selon l'usage de la voiture (essence, péage…).
   function carSummary(state, month) {
     const usage = carUsageFor(state, month);
@@ -337,6 +352,7 @@
 
   const api = {
     analyzeMonth,
+    monthContributions,
     carUsageFor,
     carSummary,
     fixedChargesDebt,

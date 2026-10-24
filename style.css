@@ -917,3 +917,15 @@ dialog::backdrop {
 .share-cols b {
   font-size: 1.2rem;
 }
+
+.list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 4px 0;
+}
+
+.list-head p {
+  margin: 0;
+}

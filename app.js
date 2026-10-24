@@ -16,7 +16,25 @@
     tab: 'home',
     month: L.monthKey(L.todayISO()),
     filter: 'all',
+    hideFixed: readPref('budg-hide-fixed') === '1',
   };
+
+  // Préférences propres à cet appareil (le stockage peut être indisponible).
+  function readPref(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writePref(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      /* tant pis : le réglage ne sera pas retenu */
+    }
+  }
 
   // ---------- Utilitaires ----------
 
@@ -917,6 +935,28 @@
     </div>`;
   }
 
+  // « Qui a payé » d'un mois, virements compris, comparé à la part de chacun.
+  function whoPaidHtml(month) {
+    const c = L.monthContributions(S.state, month);
+    if (!c.paid.a && !c.paid.b && !c.given.a && !c.given.b) return '<div class="empty">Rien ce mois-ci.</div>';
+    const pos = { a: Math.max(0, c.funded.a), b: Math.max(0, c.funded.b) };
+    const transfers = ['a', 'b']
+      .filter((p) => c.given[p])
+      .map((p) => `+ ${euro(c.given[p])} virés par ${esc(name(p))} à ${esc(name(other(p)))}`)
+      .join(' · ');
+    const conclusion =
+      c.diffA === 0
+        ? '✅ Chacun a financé exactement sa part ce mois-ci.'
+        : `${esc(name(c.diffA > 0 ? 'a' : 'b'))} a financé <b>${euro(Math.abs(c.diffA))}</b> de plus que sa part ce mois-ci.`;
+    return `
+      <div class="small muted">Financé par chacun${transfers ? ' (virements compris)' : ''}</div>
+      ${splitBar(pos, euro(c.funded.a), euro(c.funded.b))}
+      <p class="small muted" style="margin:6px 0 0">Payé directement : ${esc(name('a'))} ${euro(c.paid.a)} · ${esc(name('b'))} ${euro(c.paid.b)}${transfers ? `<br>${transfers}` : ''}</p>
+      <div class="small muted" style="margin-top:12px">Part de chacun</div>
+      ${splitBar(c.share, euro(c.share.a), euro(c.share.b))}
+      <p class="small" style="margin:12px 0 0">${conclusion}</p>`;
+  }
+
   function splitBar(values, labelA, labelB) {
     const total = values.a + values.b;
     const pa = total ? (values.a / total) * 100 : 50;
@@ -1068,8 +1108,7 @@
           <div class="delta muted">${an.budgetTotal ? `${euro(an.budgetSpent)} / ${euro(an.budgetTotal)}` : 'aucun budget défini'}</div></div>
       </div>
       <div class="card">
-        <div class="small muted">Qui a payé ce mois-ci</div>
-        ${splitBar(an.paid, euro(an.paid.a), euro(an.paid.b))}
+        ${whoPaidHtml(cur)}
       </div>
       <h2>Dernières dépenses</h2>
       <div class="card list">
@@ -1098,6 +1137,10 @@
       if (f === 'a' || f === 'b') return it.data.payer === f;
       return it.data.categoryId === f;
     });
+    // « Masquer les fixes » : on ne garde que les opérations saisies à la main.
+    if (ui.hideFixed && f !== 'fixed') {
+      items = items.filter((it) => !it.data.recurringId && !it.data.recurringTransferId);
+    }
     items.sort((x, y) => (x.date === y.date ? 0 : x.date < y.date ? 1 : -1));
 
     const total = items.filter((it) => it.kind === 'e').reduce((s, it) => s + it.data.amount, 0);
@@ -1133,10 +1176,18 @@
       <div class="chips">
         ${chips.map(([v, l]) => `<button class="chip ${f === v ? 'active' : ''}" data-filter="${esc(v)}">${esc(l)}</button>`).join('')}
       </div>
-      <p class="muted small" style="margin:4px 4px 0">${items.length} opération(s) · total dépenses <b class="num">${euro(total)}</b></p>
+      <div class="list-head">
+        <p class="muted small">${items.length} opération(s) · total dépenses <b class="num">${euro(total)}</b></p>
+        <button class="chip ${ui.hideFixed ? 'active' : ''}" data-hide-fixed aria-pressed="${ui.hideFixed}">🔁 ${ui.hideFixed ? 'Fixes masquées' : 'Masquer les fixes'}</button>
+      </div>
       ${html || '<div class="card empty">Rien ce mois-ci.</div>'}`;
 
     view.querySelector('[data-add-transfer]').onclick = () => transferForm(null);
+    view.querySelector('[data-hide-fixed]').onclick = () => {
+      ui.hideFixed = !ui.hideFixed;
+      writePref('budg-hide-fixed', ui.hideFixed ? '1' : '0');
+      render();
+    };
   }
 
   function renderFixed() {
@@ -1289,14 +1340,6 @@
         ? '<span class="muted">pas d\'historique</span>'
         : `<span class="${an.vsAverage > 0 ? 'up' : 'down'}">${an.vsAverage > 0 ? '+' : ''}${an.vsAverage} % vs moy. (${euro(an.prevAverage)})</span>`;
 
-    const fairA = an.paid.a - an.share.a;
-    const fairText =
-      an.total === 0
-        ? ''
-        : fairA === 0
-          ? 'Ce mois-ci, chacun a payé exactement sa part.'
-          : `Ce mois-ci, ${esc(name(fairA > 0 ? 'a' : 'b'))} a avancé <b>${euro(Math.abs(fairA))}</b> de plus que sa part.`;
-
     view.innerHTML = `
       <div class="topbar"><h1>Analyse</h1>
         <button class="icon-btn" data-edit-budgets aria-label="Modifier les budgets">✏️</button></div>
@@ -1331,11 +1374,7 @@
 
       <h2>Qui paie quoi</h2>
       <div class="card">
-        <div class="small muted">Payé</div>
-        ${splitBar(an.paid, euro(an.paid.a), euro(an.paid.b))}
-        <div class="small muted" style="margin-top:12px">Part de chacun</div>
-        ${splitBar(an.share, euro(an.share.a), euro(an.share.b))}
-        ${fairText ? `<p class="small" style="margin:12px 0 0">${fairText}</p>` : ''}
+        ${whoPaidHtml(ui.month)}
       </div>`;
 
     bindCarCard(ui.month);

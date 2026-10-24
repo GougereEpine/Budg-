@@ -250,3 +250,19 @@ test('répartition par montant précis plutôt qu\'en %', () => {
   assert.equal(L.computeBalance(s, '2026-10').amount, 3699 + 799);
   assert.deepEqual(L.recurringSummary(s, '2026-10').share, { a: 3900, b: 799 });
 });
+
+test('qui a financé le mois : les virements comptent', () => {
+  const s = baseState({
+    expenses: [{ id: '1', date: '2026-10-03', label: 'Spotify', amount: 999, payer: 'b', categoryId: null, split: 50 }],
+    recurring: [{ id: 'loyer', label: 'Loyer', amount: 102400, payer: 'a', categoryId: null, split: 50, day: 1, startMonth: '2026-10', endMonth: null }],
+    recurringTransfers: [{ id: 'rt', from: 'b', to: 'a', auto: false, amount: 63638, day: 1, startMonth: '2026-10', endMonth: null, note: '' }],
+    transfers: [{ id: 't', date: '2026-09-30', from: 'a', to: 'b', amount: 5000, note: '' }],
+  });
+  const c = L.monthContributions(s, '2026-10');
+  assert.deepEqual(c.paid, { a: 102400, b: 999 });
+  assert.deepEqual(c.given, { a: 0, b: 63638 }); // le virement de septembre ne compte pas
+  assert.deepEqual(c.funded, { a: 102400 - 63638, b: 999 + 63638 });
+  // Part de Max : 512 + 5 (Spotify, arrondi) ; il a financé 387,62 -> Lola a financé 124,38 de plus.
+  assert.equal(c.share.a, 51200 + 500);
+  assert.equal(c.diffA, 102400 - 63638 - 51700);
+});
