@@ -417,6 +417,46 @@
     );
   }
 
+  const ICONS = [
+    '🛒', '🥖', '🥦', '🍷', '🍽️', '🍕', '🍔', '☕', '🍻', '🏠',
+    '🔑', '🛋️', '🧹', '🔧', '💡', '🔥', '💧', '📶', '📱', '💻',
+    '📺', '🎬', '🎵', '🎮', '📚', '🛡️', '🏦', '💳', '🧾', '💶',
+    '🚗', '⛽', '🚆', '🚲', '🅿️', '✈️', '🏖️', '🏔️', '🧳', '🏨',
+    '🎉', '🎟️', '🏋️', '⚽', '🎨', '💊', '🩺', '🦷', '👓', '💇',
+    '👕', '👟', '💄', '🎁', '💐', '👶', '🐶', '🐱', '🌱', '🎓',
+    '💼', '🏛️', '❤️', '💍', '🐷', '📦', '🏷️', '⭐',
+  ];
+
+  function iconPicker(categoryId) {
+    const cat = S.state.categories.find((c) => c.id === categoryId);
+    if (!cat) return;
+    const choose = (icon) => {
+      modal.close();
+      run(S.save('categories', { ...cat, icon }), 'Icône changée');
+    };
+    openModal(
+      `Icône de « ${cat.name} »`,
+      `
+      <div class="emoji-grid">
+        ${ICONS.map((i) => `<button type="button" data-emoji="${i}" class="${i === cat.icon ? 'current' : ''}">${i}</button>`).join('')}
+      </div>
+      <label class="field"><span>Ou tapez n'importe quel emoji</span>
+        <input name="icon" maxlength="8" placeholder="${esc(cat.icon)}" autocomplete="off"></label>`,
+      {
+        submitLabel: 'Utiliser',
+        onOpen: (form) => {
+          form.querySelectorAll('[data-emoji]').forEach((b) => (b.onclick = () => choose(b.dataset.emoji)));
+        },
+        onSubmit: async (form) => {
+          const icon = form.icon.value.trim();
+          if (!icon) return fail(form, 'Choisissez un emoji');
+          await S.save('categories', { ...cat, icon });
+          toast('Icône changée');
+        },
+      }
+    );
+  }
+
   // Curseur de répartition + aide « au prorata des revenus ».
   function splitSetupHtml(split, nameA, nameB) {
     return `
@@ -1003,7 +1043,7 @@
           .map(
             (c) => `
           <div class="cat-edit" data-cat="${c.id}">
-            <input class="icon-in" name="icon" value="${esc(c.icon)}" maxlength="4" aria-label="Icône">
+            <button type="button" class="icon-pick" data-pick-icon aria-label="Changer l'icône">${esc(c.icon)}</button>
             <input name="name" value="${esc(c.name)}" maxlength="30" aria-label="Nom">
             <input name="budget" inputmode="decimal" value="${amountValue(c.budget)}" placeholder="— €" aria-label="Budget mensuel">
             <button type="button" data-del-cat aria-label="Supprimer">🗑️</button>
@@ -1071,6 +1111,7 @@
           run(S.save('categories', updated), 'Enregistré');
         };
       });
+      rowEl.querySelector('[data-pick-icon]').onclick = () => iconPicker(id);
       rowEl.querySelector('[data-del-cat]').onclick = () => {
         const c = category(id);
         if (!confirm(`Supprimer la catégorie « ${c.name} » ? Ses dépenses passeront « Sans catégorie ».`)) return;

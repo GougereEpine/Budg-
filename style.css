@@ -839,8 +839,34 @@ dialog::backdrop {
   padding: 9px 8px;
 }
 
-.cat-edit .icon-in {
-  text-align: center;
+.cat-edit .icon-pick {
+  height: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 1.3rem;
+}
+
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.emoji-grid button {
+  height: 44px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 1.4rem;
+  cursor: pointer;
+}
+
+.emoji-grid button.current {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .cat-edit button {
