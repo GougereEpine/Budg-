@@ -68,12 +68,17 @@ create table public.budg_transfers (
 create index on public.budg_categories (household_id);
 create index on public.budg_expenses (household_id, date);
 create index on public.budg_expenses (category_id);
+create index on public.budg_expenses (created_by);
 create index on public.budg_recurring (household_id);
 create index on public.budg_recurring (category_id);
 create index on public.budg_transfers (household_id);
 
 -- Appartenance au couple (security definer pour éviter la récursion RLS sur budg_members).
-create function public.budg_is_member(hid uuid)
+-- Rangée dans un schéma non exposé par l'API REST.
+create schema budg_private;
+grant usage on schema budg_private to authenticated;
+
+create function budg_private.budg_is_member(hid uuid)
 returns boolean
 language sql
 security definer
@@ -94,25 +99,25 @@ alter table public.budg_recurring enable row level security;
 alter table public.budg_transfers enable row level security;
 
 create policy "membres : lecture" on public.budg_households
-  for select to authenticated using (public.budg_is_member(id));
+  for select to authenticated using (budg_private.budg_is_member(id));
 create policy "membres : modification" on public.budg_households
-  for update to authenticated using (public.budg_is_member(id)) with check (public.budg_is_member(id));
+  for update to authenticated using (budg_private.budg_is_member(id)) with check (budg_private.budg_is_member(id));
 
 create policy "membres : lecture" on public.budg_members
-  for select to authenticated using (public.budg_is_member(household_id));
+  for select to authenticated using (budg_private.budg_is_member(household_id));
 
 create policy "membres : tout" on public.budg_categories
   for all to authenticated
-  using (public.budg_is_member(household_id)) with check (public.budg_is_member(household_id));
+  using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
 create policy "membres : tout" on public.budg_expenses
   for all to authenticated
-  using (public.budg_is_member(household_id)) with check (public.budg_is_member(household_id));
+  using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
 create policy "membres : tout" on public.budg_recurring
   for all to authenticated
-  using (public.budg_is_member(household_id)) with check (public.budg_is_member(household_id));
+  using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
 create policy "membres : tout" on public.budg_transfers
   for all to authenticated
-  using (public.budg_is_member(household_id)) with check (public.budg_is_member(household_id));
+  using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
 
 -- Création d'un couple : l'appelant devient la personne 'a'.
 create function public.budg_create_household(p_name_a text, p_name_b text, p_default_split int)
@@ -166,10 +171,10 @@ begin
 end;
 $$;
 
-revoke execute on function public.budg_is_member(uuid) from public, anon;
+revoke execute on function budg_private.budg_is_member(uuid) from public, anon;
 revoke execute on function public.budg_create_household(text, text, int) from public, anon;
 revoke execute on function public.budg_join_household(text) from public, anon;
-grant execute on function public.budg_is_member(uuid) to authenticated;
+grant execute on function budg_private.budg_is_member(uuid) to authenticated;
 grant execute on function public.budg_create_household(text, text, int) to authenticated;
 grant execute on function public.budg_join_household(text) to authenticated;
 
