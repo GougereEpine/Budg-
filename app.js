@@ -312,9 +312,23 @@
         }
       }
       preview.innerHTML = text;
+      // Articles pour une seule personne (formulaire de dépense uniquement).
+      const extras = form.querySelector('details.extras');
+      if (extras) {
+        extras.hidden = sel.value === 'custom' && eur;
+        const ex = readExtras(form);
+        const out = form.querySelector('[data-extras-preview]');
+        if (!ex) out.innerHTML = '⚠️ Montant invalide';
+        else if (!(amount > 0) || !(ex.extraA || ex.extraB)) out.innerHTML = 'Le reste est partagé selon la répartition ci-dessus.';
+        else if (ex.extraA + ex.extraB > amount) out.innerHTML = `⚠️ Plus que le montant total (${euro(amount)})`;
+        else {
+          const sh = L.sharesOf({ amount, split: readSplit(form, getMonth()), ...ex });
+          out.innerHTML = `${euro(amount - ex.extraA - ex.extraB)} partagés, au total : ${esc(name('a'))} <b>${euro(sh.a)}</b> · ${esc(name('b'))} <b>${euro(sh.b)}</b>`;
+        }
+      }
     };
     sel.onchange = sync;
-    form.querySelectorAll('[name=customUnit],[name=splitCustom],[name=shareCustom],[name=amount]').forEach((i) => {
+    form.querySelectorAll('[name=customUnit],[name=splitCustom],[name=shareCustom],[name=amount],[name=extraA],[name=extraB]').forEach((i) => {
       i.addEventListener('input', sync);
       i.addEventListener('change', sync);
     });
@@ -335,6 +349,18 @@
     return Number.isFinite(cents) ? cents : null;
   }
 
+  // Articles « rien que pour » (centimes) ; null si un montant est invalide.
+  function readExtras(form) {
+    if (!form.extraA) return { extraA: 0, extraB: 0 };
+    const read = (input) => {
+      const v = input.value.trim();
+      return v === '' ? 0 : L.parseAmount(v);
+    };
+    const extraA = read(form.extraA);
+    const extraB = read(form.extraB);
+    return Number.isFinite(extraA) && Number.isFinite(extraB) ? { extraA, extraB } : null;
+  }
+
   // Lit la répartition du formulaire ; renvoie null (et affiche l'erreur) si invalide.
   function readSplitting(form, amount, month) {
     const byUsage = readByUsage(form);
@@ -342,9 +368,12 @@
     if (form.splitMode.value === 'custom' && form.customUnit.value === 'eur') {
       if (shareA == null) return fail(form, `Montant pour ${name('a')} invalide`) && null;
       if (shareA > amount) return fail(form, `Le montant pour ${name('a')} dépasse le total`) && null;
-      return { split: Math.round((shareA / amount) * 100), shareA, byUsage: false };
+      return { split: Math.round((shareA / amount) * 100), shareA, byUsage: false, extraA: 0, extraB: 0 };
     }
-    return { split: readSplit(form, month), shareA: null, byUsage };
+    const extras = readExtras(form);
+    if (!extras) return fail(form, 'Montant « rien que pour » invalide') && null;
+    if (extras.extraA + extras.extraB > amount) return fail(form, 'Les montants « rien que pour » dépassent le total') && null;
+    return { split: readSplit(form, month), shareA: null, byUsage, ...extras };
   }
 
   function readSplit(form, month) {
@@ -379,26 +408,56 @@
       categoryId: preset.categoryId || (sortedCategories()[0] || {}).id || null,
       split: S.state.defaultSplit,
     };
+    const titles = existing
+      ? ['Modifier la dépense', "Modifier l'entrée d'argent"]
+      : ['Nouvelle dépense', "Nouvelle entrée d'argent"];
     openModal(
-      existing ? 'Modifier la dépense' : 'Nouvelle dépense',
+      titles[e.isIncome ? 1 : 0],
       `
-      <label class="field"><span>Montant</span>
+      <div class="seg" style="margin-bottom:14px">
+        <label><input type="radio" name="kind" value="expense" ${e.isIncome ? '' : 'checked'}><span>💳 Dépense</span></label>
+        <label><input type="radio" name="kind" value="income" ${e.isIncome ? 'checked' : ''}><span>💰 Entrée d'argent</span></label>
+      </div>
+      <p class="hint" data-income-hint ${e.isIncome ? '' : 'hidden'}>Remboursement EDF, d'assurance, de mutuelle… : partagé selon la répartition et déduit des dépenses de la catégorie.</p>
+      <label class="field"><span data-amount-label>${e.isIncome ? 'Montant reçu' : 'Montant'}</span>
         <input class="big" name="amount" inputmode="decimal" placeholder="0 €" value="${amountValue(e.amount)}" required autocomplete="off">
       </label>
       <label class="field"><span>Quoi ?</span>
-        <input name="label" placeholder="Courses Carrefour, resto…" value="${esc(e.label)}" maxlength="80" required>
+        <input name="label" placeholder="${e.isIncome ? 'Remboursement EDF…' : 'Courses Carrefour, resto…'}" value="${esc(e.label)}" maxlength="80" required>
       </label>
       ${payerField(e.payer)}
       <div class="row">
         <label class="field"><span>Date</span><input type="date" name="date" value="${e.date}" required></label>
         ${categoryField(e.categoryId)}
       </div>
-      ${splitField(e, L.monthKey(e.date))}`,
+      ${splitField(e, L.monthKey(e.date))}
+      <details class="extras" ${e.extraA || e.extraB ? 'open' : ''}>
+        <summary>🧴 Une partie pour une seule personne <span class="muted">(shampoing, dessert…)</span></summary>
+        <div class="row" style="margin-top:10px">
+          <label class="field"><span>Rien que pour ${esc(name('a'))}</span>
+            <input name="extraA" inputmode="decimal" placeholder="0 €" value="${amountValue(e.extraA)}" autocomplete="off"></label>
+          <label class="field"><span>Rien que pour ${esc(name('b'))}</span>
+            <input name="extraB" inputmode="decimal" placeholder="0 €" value="${amountValue(e.extraB)}" autocomplete="off"></label>
+        </div>
+        <p class="hint" data-extras-preview>Le reste est partagé selon la répartition ci-dessus.</p>
+      </details>`,
       {
         onOpen: (form) => {
           const month = () => L.monthKey(form.date.value || today());
           const sync = bindSplitField(form, month);
           form.date.onchange = sync;
+          // Dépense ou entrée d'argent : seuls les libellés changent.
+          const payerLabel = form.querySelector('[name=payer]').closest('label.field').querySelector('span');
+          const syncKind = () => {
+            const income = form.kind.value === 'income';
+            form.querySelector('.modal-head h2').textContent = titles[income ? 1 : 0];
+            form.querySelector('[data-income-hint]').hidden = !income;
+            form.querySelector('[data-amount-label]').textContent = income ? 'Montant reçu' : 'Montant';
+            payerLabel.textContent = income ? 'Reçu par' : 'Payé par';
+            form.label.placeholder = income ? 'Remboursement EDF…' : 'Courses Carrefour, resto…';
+          };
+          form.querySelectorAll('[name=kind]').forEach((i) => (i.onchange = syncKind));
+          syncKind();
           // Nouvelle dépense : on reprend la répartition de la dernière dépense de la catégorie
           // (ex. « Transport » toujours selon l'usage de la voiture).
           if (!existing) {
@@ -427,13 +486,14 @@
           await S.save('expenses', {
             ...e,
             ...splitting,
+            isIncome: form.kind.value === 'income',
             amount,
             label: form.label.value.trim(),
             payer: form.payer.value,
             date: form.date.value,
             categoryId: form.categoryId.value || null,
           });
-          toast(existing ? 'Dépense modifiée' : 'Dépense ajoutée');
+          toast(form.kind.value === 'income' ? 'Entrée d\'argent enregistrée' : existing ? 'Dépense modifiée' : 'Dépense ajoutée');
         },
         onDelete: existing ? () => S.remove('expenses', e.id) : null,
       }
@@ -899,19 +959,29 @@
       Moyenne des derniers mois : ${euro(a.average)}</div></div>`;
   }
 
+  function extrasText(e) {
+    const parts = [];
+    if (e.extraA) parts.push(`${esc(name('a'))} +${euro(Math.abs(e.extraA))}`);
+    if (e.extraB) parts.push(`${esc(name('b'))} +${euro(Math.abs(e.extraB))}`);
+    return parts.length ? ` · 🧴 ${parts.join(', ')}` : '';
+  }
+
   function expenseItem(e) {
     const c = category(e.categoryId);
-    const tag = e.recurringId ? '🔁 ' : '';
+    const tag = e.recurringId ? '🔁 ' : e.isIncome ? '💰 ' : '';
+    // Les entrées d'argent arrivent en négatif depuis les calculs : on affiche des valeurs positives.
+    const amount = Math.abs(e.amount);
+    const shareA = e.shareA == null ? e.shareA : Math.abs(e.shareA);
     return `
       <div class="item" data-expense="${e.id}">
         <div class="emoji">${esc(c.icon)}</div>
         <div class="body">
           <div class="title">${tag}${esc(e.label)}</div>
-          <div class="sub">${esc(c.name)} · ${splitText(e.split, e.byUsage, e.shareA, e.amount)}</div>
+          <div class="sub">${esc(c.name)} · ${splitText(e.split, e.byUsage, shareA, amount)}${extrasText(e)}</div>
         </div>
         <div class="right">
-          <div class="amt num">${euro(e.amount)}</div>
-          <span class="pill ${e.payer}">${esc(name(e.payer))}</span>
+          <div class="amt num ${e.isIncome ? 'income' : ''}">${e.isIncome ? '+' : ''}${euro(amount)}</div>
+          <span class="pill ${e.payer}">${e.isIncome ? 'reçu · ' : ''}${esc(name(e.payer))}</span>
         </div>
       </div>`;
   }

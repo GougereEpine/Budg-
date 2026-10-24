@@ -1000,3 +1000,18 @@ details.group[open] .chev {
   height: 32px;
   font-size: 1rem;
 }
+
+.amt.income {
+  color: var(--ok);
+}
+
+details.extras {
+  margin: -4px 0 12px;
+  font-size: 0.9rem;
+}
+
+details.extras > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}

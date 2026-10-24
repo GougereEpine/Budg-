@@ -8,7 +8,8 @@ create table public.budg_households (
   name_b text not null,
   default_split int not null default 50 check (default_split between 0 and 100),
   invite_code text not null unique default upper(substr(md5(gen_random_uuid()::text), 1, 6)),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  check (extra_a + extra_b <= amount)
 );
 
 -- Chaque couple a deux places : 'a' (créateur) et 'b' (partenaire invité).
@@ -40,6 +41,9 @@ create table public.budg_expenses (
   split int not null check (split between 0 and 100),
   share_a int check (share_a >= 0 and share_a <= amount), -- montant précis pour 'a' (sinon split en %)
   by_usage boolean not null default false, -- répartie selon l'usage de la voiture du mois
+  is_income boolean not null default false, -- entrée d'argent (remboursement EDF…) : déduite
+  extra_a int not null default 0 check (extra_a >= 0), -- articles pour 'a' seul (shampoing…)
+  extra_b int not null default 0 check (extra_b >= 0),
   created_by uuid default auth.uid() references auth.users (id) on delete set null,
   created_at timestamptz not null default now()
 );

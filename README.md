@@ -6,11 +6,15 @@ suit les **budgets du mois** et prévient quand ça dérape.
 ## Fonctionnalités
 
 - **Dépenses** : montant, qui a payé, catégorie, répartition (50/50, au prorata des revenus,
-  « tout pour l'autre », personnalisée en % ou en montant précis).
+  « tout pour l'autre », personnalisée en % ou en montant précis), avec une partie pour une seule
+  personne (le shampoing dans les courses, le dessert au resto).
+- **Entrées d'argent** : remboursement EDF, d'assurance, de mutuelle… reçu par l'un, partagé selon
+  la répartition et déduit des dépenses de la catégorie.
 - **Voiture** : l'essence, le péage ou l'assurance auto peuvent être répartis selon l'usage de
   la voiture du mois (en %, ou calculé à partir des kilomètres de chacun), réglable en fin de mois.
 - **Charges fixes** : loyer, assurances, abonnements… saisis une fois, comptés automatiquement
-  chaque mois (jour de prélèvement, date de début et de fin), avec la part en euros de chacun.
+  chaque mois (jour de prélèvement, date de début et de fin), regroupées par catégorie avec la part
+  en euros de chacun.
 - **Remboursements automatiques** : un virement permanent saisi une fois, à montant fixe ou
   égal à la part des charges fixes de l'autre (recalculée chaque mois).
 - **Solde du couple** : « Léa doit 468,25 € à Max », avec un bouton *Régler* qui enregistre le remboursement.

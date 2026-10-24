@@ -47,10 +47,14 @@
   }
 
   // Parts d'une dépense : montant précis pour a (`shareA`, en centimes) s'il est
-  // renseigné, sinon le pourcentage `split`.
+  // renseigné, sinon le pourcentage `split`. `extraA` / `extraB` : articles pour
+  // une seule personne (shampoing, dessert…) retirés avant le partage.
   function sharesOf(e) {
     if (e.shareA != null && !e.byUsage) return { a: e.shareA, b: e.amount - e.shareA };
-    return shareOf(e.amount, e.split);
+    const extraA = e.extraA || 0;
+    const extraB = e.extraB || 0;
+    const s = shareOf(e.amount - extraA - extraB, e.split);
+    return { a: s.a + extraA, b: s.b + extraB };
   }
 
   // Usage de la voiture : % d'utilisation par a pour un mois. Si le mois n'est pas
@@ -70,6 +74,20 @@
   // Une dépense « selon l'usage de la voiture » prend le % du mois où elle a lieu.
   function withUsage(state, e) {
     return e.byUsage ? { ...e, split: carUsageFor(state, monthKey(e.date)).split } : e;
+  }
+
+  // Une entrée d'argent (remboursement EDF, d'assurance…) est une dépense en
+  // négatif : elle réduit la catégorie, et la personne qui l'a reçue doit sa
+  // part à l'autre.
+  function signed(e) {
+    if (!e.isIncome) return e;
+    return {
+      ...e,
+      amount: -e.amount,
+      shareA: e.shareA == null ? e.shareA : -e.shareA,
+      extraA: -(e.extraA || 0),
+      extraB: -(e.extraB || 0),
+    };
   }
 
   // Génère les occurrences mensuelles des charges fixes jusqu'au mois `upTo` inclus.
@@ -138,7 +156,7 @@
   // Dépenses ponctuelles + occurrences des charges fixes, jusqu'au mois `upTo`.
   function allExpenses(state, upTo) {
     const real = state.expenses.filter((e) => monthKey(e.date) <= upTo);
-    return real.concat(expandRecurring(state.recurring, upTo)).map((e) => withUsage(state, e));
+    return real.concat(expandRecurring(state.recurring, upTo)).map((e) => signed(withUsage(state, e)));
   }
 
   // Solde du couple : net.a > 0 signifie que b doit net.a à a.
@@ -148,7 +166,7 @@
   function computeBalance(state, upTo) {
     const net = { a: 0, b: 0 };
     for (const raw of state.expenses.concat(expandRecurring(state.recurring, upTo))) {
-      const e = withUsage(state, raw);
+      const e = signed(withUsage(state, raw));
       const s = sharesOf(e);
       net[e.payer] += e.amount;
       net.a -= s.a;

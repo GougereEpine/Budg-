@@ -266,3 +266,38 @@ test('qui a financé le mois : les virements comptent', () => {
   assert.equal(c.share.a, 51200 + 500);
   assert.equal(c.diffA, 102400 - 63638 - 51700);
 });
+
+test('entrée d\'argent : remboursement EDF reçu par l\'un, partagé et déduit', () => {
+  const s = baseState({
+    categories: [{ id: 'nrj', name: 'Énergie', icon: '💡', budget: 15000, position: 0 }],
+    recurring: [{ id: 'edf', label: 'EDF', amount: 10600, payer: 'a', categoryId: 'nrj', split: 50, day: 1, startMonth: '2026-10', endMonth: null }],
+    expenses: [{ id: 'r', date: '2026-10-20', label: 'Remboursement EDF', amount: 4000, payer: 'a', categoryId: 'nrj', split: 50, isIncome: true }],
+  });
+  const sum = L.monthSummary(s, '2026-10');
+  assert.equal(sum.total, 6600); // 106 - 40
+  assert.equal(sum.categories[0].spent, 6600);
+  // EDF : Lola doit 53 ; Maxime a reçu 40 dont 20 pour Lola -> Lola doit 33.
+  const bal = L.computeBalance(s, '2026-10');
+  assert.equal(bal.debtor, 'b');
+  assert.equal(bal.amount, 3300);
+  // Montant précis : 30 € pour Maxime, 10 € pour Lola.
+  s.expenses[0].shareA = 3000;
+  assert.equal(L.computeBalance(s, '2026-10').amount, 5300 - 1000);
+});
+
+test('articles pour une seule personne (shampoing, dessert)', () => {
+  const s = baseState({
+    expenses: [
+      // Courses 33,80 dont shampoing 5 € pour Maxime : reste 28,80 partagé 50/50.
+      { id: '1', date: '2026-10-24', label: 'Courses', amount: 3380, payer: 'a', categoryId: null, split: 50, extraA: 500, extraB: 0 },
+      // Resto 60 € payé par Lola, dessert 7 € pour Lola seulement.
+      { id: '2', date: '2026-10-24', label: 'Resto', amount: 6000, payer: 'b', categoryId: null, split: 50, extraA: 0, extraB: 700 },
+    ],
+  });
+  assert.deepEqual(L.sharesOf(s.expenses[0]), { a: 1440 + 500, b: 1440 });
+  assert.deepEqual(L.sharesOf(s.expenses[1]), { a: 2650, b: 2650 + 700 });
+  // Lola doit 14,40 ; Maxime doit 26,50 -> Maxime doit 12,10.
+  const bal = L.computeBalance(s, '2026-10');
+  assert.equal(bal.debtor, 'a');
+  assert.equal(bal.amount, 1210);
+});
