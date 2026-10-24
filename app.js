@@ -1022,7 +1022,7 @@
 
   // « Qui a payé » d'un mois, virements compris, comparé à la part de chacun.
   function whoPaidHtml(month) {
-    const c = L.monthContributions(S.state, month);
+    const c = L.monthContributions(S.state, month, { variableOnly: ui.hideFixed });
     if (!c.paid.a && !c.paid.b && !c.given.a && !c.given.b) return '<div class="empty">Rien ce mois-ci.</div>';
     const pos = { a: Math.max(0, c.funded.a), b: Math.max(0, c.funded.b) };
     const transfers = ['a', 'b']
@@ -1034,7 +1034,7 @@
         ? '✅ Chacun a financé exactement sa part ce mois-ci.'
         : `${esc(name(c.diffA > 0 ? 'a' : 'b'))} a financé <b>${euro(Math.abs(c.diffA))}</b> de plus que sa part ce mois-ci.`;
     return `
-      <div class="small muted">Financé par chacun${transfers ? ' (virements compris)' : ''}</div>
+      <div class="small muted">Financé par chacun${ui.hideFixed ? ' — hors charges fixes' : ''}${transfers ? ' (virements compris)' : ''}</div>
       ${splitBar(pos, euro(c.funded.a), euro(c.funded.b))}
       <p class="small muted" style="margin:6px 0 0">Payé directement : ${esc(name('a'))} ${euro(c.paid.a)} · ${esc(name('b'))} ${euro(c.paid.b)}${transfers ? `<br>${transfers}` : ''}</p>
       <div class="small muted" style="margin-top:12px">Part de chacun</div>

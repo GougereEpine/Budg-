@@ -334,3 +334,17 @@ test('budget annuel (vacances) : cagnotte et pas d\'alerte le mois du départ', 
   assert.equal(an2.categories.find((c) => c.id === 'vac').level, 'over');
   assert.deepEqual(an2.alerts[0], { level: 'over', annual: true, categoryId: 'vac', pct: 106, excess: 10000 });
 });
+
+test('qui a financé, hors charges fixes', () => {
+  const s = baseState({
+    expenses: [{ id: '1', date: '2026-10-03', label: 'Courses', amount: 3380, payer: 'a', categoryId: null, split: 50 }],
+    recurring: [{ id: 'loyer', label: 'Loyer', amount: 102400, payer: 'a', categoryId: null, split: 50, day: 1, startMonth: '2026-10', endMonth: null }],
+    recurringTransfers: [{ id: 'rt', from: 'b', to: 'a', auto: true, amount: null, day: 1, startMonth: '2026-10', endMonth: null, note: '' }],
+    transfers: [{ id: 't', date: '2026-10-20', from: 'b', to: 'a', amount: 1000, note: '' }],
+  });
+  const c = L.monthContributions(s, '2026-10', { variableOnly: true });
+  assert.deepEqual(c.paid, { a: 3380, b: 0 });
+  assert.deepEqual(c.given, { a: 0, b: 1000 }); // virement manuel gardé, remboursement auto exclu
+  assert.deepEqual(c.share, { a: 1690, b: 1690 });
+  assert.equal(c.diffA, 3380 - 1000 - 1690);
+});
