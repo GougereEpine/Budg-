@@ -9,6 +9,8 @@ suit les **budgets du mois** et prévient quand ça dérape.
   « tout pour l'autre », personnalisée).
 - **Charges fixes** : loyer, assurances, abonnements… saisis une fois, comptés automatiquement
   chaque mois (jour de prélèvement, date de début et de fin).
+- **Remboursements automatiques** : un virement permanent saisi une fois, à montant fixe ou
+  égal à la part des charges fixes de l'autre (recalculée chaque mois).
 - **Solde du couple** : « Léa doit 468,25 € à Max », avec un bouton *Régler* qui enregistre le remboursement.
 - **Budgets mensuels** par catégorie (Courses 400 €, Restaurants 100 €, Vacances 150 €…).
 - **Analyse** :

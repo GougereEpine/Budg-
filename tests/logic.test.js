@@ -168,3 +168,42 @@ test('splitFromIncomes : au prorata des revenus', () => {
   assert.equal(L.splitFromIncomes(300000, 200000), 60);
   assert.equal(L.splitFromIncomes(0, 0), 50);
 });
+
+test('remboursement automatique : sa part des charges fixes, chaque mois', () => {
+  const s = baseState({
+    recurring: [
+      { id: 'loyer', label: 'Loyer', amount: 100000, payer: 'a', categoryId: 'logement', split: 50, day: 1, startMonth: '2026-08', endMonth: null },
+      { id: 'netflix', label: 'Netflix', amount: 2000, payer: 'b', categoryId: 'loisirs', split: 50, day: 1, startMonth: '2026-10', endMonth: null },
+    ],
+    recurringTransfers: [
+      { id: 'rt', from: 'b', to: 'a', auto: true, amount: null, day: 1, startMonth: '2026-08', endMonth: null, note: '' },
+    ],
+  });
+  // Août/sept : Sam doit 500 ; octobre : 500 - 10 (Netflix payé par Sam) = 490.
+  assert.equal(L.fixedChargesDebt(s, '2026-09', 'b'), 50000);
+  assert.equal(L.fixedChargesDebt(s, '2026-10', 'b'), 49000);
+  assert.equal(L.fixedChargesDebt(s, '2026-10', 'a'), 0);
+  const occ = L.expandRecurringTransfers(s, '2026-10');
+  assert.deepEqual(occ.map((t) => [t.date, t.amount]), [
+    ['2026-08-01', 50000],
+    ['2026-09-01', 50000],
+    ['2026-10-01', 49000],
+  ]);
+  // Les charges fixes sont exactement remboursées : solde nul.
+  assert.equal(L.computeBalance(s, '2026-10').amount, 0);
+});
+
+test('remboursement automatique à montant fixe, avec fin', () => {
+  const s = baseState({
+    expenses: [{ id: '1', date: '2026-09-02', label: 'Courses', amount: 60000, payer: 'a', categoryId: 'courses', split: 50 }],
+    recurringTransfers: [
+      { id: 'rt', from: 'b', to: 'a', auto: false, amount: 10000, day: 5, startMonth: '2026-09', endMonth: '2026-10', note: '' },
+    ],
+  });
+  assert.equal(L.expandRecurringTransfers(s, '2026-12').length, 2);
+  // Sam doit 300, a remboursé 2 × 100.
+  const bal = L.computeBalance(s, '2026-12');
+  assert.equal(bal.debtor, 'b');
+  assert.equal(bal.amount, 10000);
+  assert.equal(L.allTransfers(s, '2026-09').length, 1);
+});

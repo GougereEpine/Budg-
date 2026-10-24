@@ -398,6 +398,84 @@
     );
   }
 
+  function recurringTransferForm(existing) {
+    // Par défaut : la personne qui avance le moins de charges fixes rembourse l'autre.
+    const rs = L.recurringSummary(S.state, currentMonth());
+    const defaultFrom = rs.share.a - rs.paid.a > rs.share.b - rs.paid.b ? 'a' : 'b';
+    const t = existing || {
+      id: S.newId(),
+      from: defaultFrom,
+      to: other(defaultFrom),
+      auto: true,
+      amount: null,
+      day: 1,
+      startMonth: currentMonth(),
+      endMonth: null,
+      note: '',
+    };
+    const preview = (from) => euro(L.fixedChargesDebt(S.state, currentMonth(), from));
+    openModal(
+      existing ? 'Modifier le remboursement auto' : 'Remboursement automatique',
+      `
+      <p class="hint" style="margin-top:0">Un virement qui revient chaque mois (virement permanent…) : plus besoin de le saisir.</p>
+      ${payerField(t.from, 'from', 'Qui rembourse ?')}
+      <label class="field"><span>Montant</span>
+        <div class="seg">
+          <label><input type="radio" name="mode" value="auto" ${t.auto ? 'checked' : ''}><span>Sa part des charges fixes</span></label>
+          <label><input type="radio" name="mode" value="fixed" ${t.auto ? '' : 'checked'}><span>Montant fixe</span></label>
+        </div>
+      </label>
+      <p class="hint" data-auto-hint ${t.auto ? '' : 'hidden'}>Recalculé chaque mois d'après les charges fixes. Ce mois-ci : <b data-preview>${preview(t.from)}</b>.</p>
+      <label class="field" data-fixed ${t.auto ? 'hidden' : ''}><span>Montant mensuel</span>
+        <input class="big" name="amount" inputmode="decimal" placeholder="0 €" value="${amountValue(t.amount)}" autocomplete="off">
+      </label>
+      <div class="row">
+        <label class="field"><span>Jour du virement</span>
+          <input type="number" name="day" min="1" max="31" value="${t.day}" required></label>
+        <label class="field"><span>À partir de</span>
+          <input type="month" name="startMonth" value="${t.startMonth}" required></label>
+      </div>
+      <label class="field"><span>Jusqu'à (vide = toujours en cours)</span>
+        <input type="month" name="endMonth" value="${t.endMonth || ''}"></label>
+      <label class="field"><span>Note</span>
+        <input name="note" value="${esc(t.note)}" maxlength="80" placeholder="Virement permanent…"></label>`,
+      {
+        onOpen: (form) => {
+          const sync = () => {
+            const auto = form.mode.value === 'auto';
+            form.querySelector('[data-auto-hint]').hidden = !auto;
+            form.querySelector('[data-fixed]').hidden = auto;
+            form.querySelector('[data-preview]').textContent = preview(form.from.value);
+          };
+          form.querySelectorAll('[name=mode],[name=from]').forEach((i) => (i.onchange = sync));
+        },
+        onSubmit: async (form) => {
+          const auto = form.mode.value === 'auto';
+          const amount = auto ? null : readAmount(form);
+          if (!auto && !amount) return fail(form, 'Montant invalide');
+          const startMonth = form.startMonth.value;
+          const endMonth = form.endMonth.value || null;
+          if (!/^\d{4}-\d{2}$/.test(startMonth)) return fail(form, 'Mois de début invalide');
+          if (endMonth && endMonth < startMonth) return fail(form, 'La fin doit être après le début');
+          const from = form.from.value;
+          await S.save('recurringTransfers', {
+            ...t,
+            from,
+            to: other(from),
+            auto,
+            amount,
+            day: Math.min(31, Math.max(1, Math.round(Number(form.day.value)) || 1)),
+            startMonth,
+            endMonth,
+            note: form.note.value.trim(),
+          });
+          toast(existing ? 'Remboursement auto modifié' : 'Remboursement auto ajouté');
+        },
+        onDelete: existing ? () => S.remove('recurringTransfers', t.id) : null,
+      }
+    );
+  }
+
   function budgetForm(cat) {
     openModal(
       `${cat.icon} ${cat.name}`,
@@ -697,7 +775,7 @@
       <div class="item" data-transfer="${t.id}">
         <div class="emoji">💸</div>
         <div class="body">
-          <div class="title">Remboursement</div>
+          <div class="title">${t.recurringTransferId ? '🔁 ' : ''}Remboursement</div>
           <div class="sub">${esc(name(t.from))} → ${esc(name(t.to))}${t.note ? ' · ' + esc(t.note) : ''}</div>
         </div>
         <div class="right"><div class="amt num">${euro(t.amount)}</div></div>
@@ -790,7 +868,7 @@
   function renderExpenses() {
     const state = S.state;
     const expenses = L.monthExpenses(state, ui.month);
-    const transfers = state.transfers.filter((t) => L.monthKey(t.date) === ui.month);
+    const transfers = L.allTransfers(state, ui.month).filter((t) => L.monthKey(t.date) === ui.month);
 
     let items = expenses.map((e) => ({ kind: 'e', date: e.date, data: e }));
     items = items.concat(transfers.map((t) => ({ kind: 't', date: t.date, data: t })));
@@ -870,13 +948,32 @@
         </div>`;
     };
 
+    const isActive = (r) => r.startMonth <= cur && (!r.endMonth || r.endMonth >= cur);
+    const rtList = [...state.recurringTransfers].sort((x, y) => (x.startMonth < y.startMonth ? -1 : 1));
     const diffA = rs.paid.a - rs.share.a;
-    const balanceText =
-      rs.total === 0
-        ? ''
-        : diffA === 0
-          ? 'Les charges fixes sont parfaitement équilibrées entre vous.'
-          : `Chaque mois, ${esc(name(diffA > 0 ? 'a' : 'b'))} avance <b>${euro(Math.abs(diffA))}</b> de plus que sa part : c'est automatiquement compté dans le solde.`;
+    const debtor = diffA > 0 ? 'b' : 'a';
+    const covering = rtList.find((r) => isActive(r) && r.auto && r.from === debtor);
+    let balanceText = '';
+    if (rs.total && diffA === 0) balanceText = 'Les charges fixes sont parfaitement équilibrées entre vous.';
+    else if (rs.total && covering) {
+      balanceText = `${esc(name(debtor))} rembourse automatiquement sa part (<b>${euro(Math.abs(diffA))}</b>) le ${covering.day} du mois. ✅`;
+    } else if (rs.total) {
+      balanceText = `Chaque mois, ${esc(name(other(debtor)))} avance <b>${euro(Math.abs(diffA))}</b> de plus que sa part : c'est compté dans le solde. Ajoutez un remboursement automatique si ${esc(name(debtor))} fait un virement permanent.`;
+    }
+
+    const rtItem = (r) => {
+      const amount = r.auto ? L.fixedChargesDebt(state, cur, r.from) : r.amount;
+      const when = r.startMonth > cur ? `à partir de ${monthLabel(r.startMonth)}` : r.endMonth && r.endMonth < cur ? `terminé en ${monthLabel(r.endMonth)}` : `le ${r.day} du mois`;
+      return `
+        <div class="item" data-recurring-transfer="${r.id}" style="${isActive(r) ? '' : 'opacity:.6'}">
+          <div class="emoji">💸</div>
+          <div class="body">
+            <div class="title">${esc(name(r.from))} → ${esc(name(r.to))}</div>
+            <div class="sub">${r.auto ? 'Sa part des charges fixes' : 'Montant fixe'} · ${esc(when)}${r.note ? ' · ' + esc(r.note) : ''}</div>
+          </div>
+          <div class="right"><div class="amt num">${euro(amount)}<span class="small muted">/mois</span></div></div>
+        </div>`;
+    };
 
     view.innerHTML = `
       <div class="topbar"><h1>Charges fixes</h1>
@@ -890,9 +987,15 @@
       <div class="card list">
         ${active.length ? active.map(item).join('') : `<div class="empty">Ajoutez le loyer, les assurances, les abonnements…<br><br><button class="btn primary" data-add-recurring>＋ Ajouter une charge fixe</button></div>`}
       </div>
-      ${inactive.length ? `<h2>À venir ou terminées</h2><div class="card list">${inactive.map(item).join('')}</div>` : ''}`;
+      ${inactive.length ? `<h2>À venir ou terminées</h2><div class="card list">${inactive.map(item).join('')}</div>` : ''}
+      <div class="topbar"><h2>🔁 Remboursements automatiques</h2>
+        <button class="icon-btn" data-add-rt aria-label="Ajouter un remboursement automatique">＋</button></div>
+      <div class="card list">
+        ${rtList.length ? rtList.map(rtItem).join('') : `<div class="empty">Ex. : ${esc(name(debtor))} rembourse sa part des charges fixes chaque début de mois.<br><br><button class="btn" data-add-rt>＋ Ajouter un remboursement auto</button></div>`}
+      </div>`;
 
     view.querySelectorAll('[data-add-recurring]').forEach((b) => (b.onclick = () => recurringForm(null)));
+    view.querySelectorAll('[data-add-rt]').forEach((b) => (b.onclick = () => recurringTransferForm(null)));
   }
 
   function renderBudget() {
@@ -1212,7 +1315,7 @@
   // Délégation des clics dans la vue.
   view.addEventListener('click', (ev) => {
     const t = ev.target.closest(
-      '[data-expense],[data-transfer],[data-recurring],[data-category],[data-month],[data-filter],[data-goto],[data-settings]'
+      '[data-expense],[data-transfer],[data-recurring-transfer],[data-recurring],[data-category],[data-month],[data-filter],[data-goto],[data-settings]'
     );
     if (!t) return;
     const d = t.dataset;
@@ -1224,7 +1327,12 @@
       if (rec) recurringForm(rec);
     } else if (d.transfer) {
       const tr = S.state.transfers.find((x) => x.id === d.transfer);
-      if (tr) transferForm(tr);
+      if (tr) return transferForm(tr);
+      const rt = S.state.recurringTransfers.find((x) => x.id === d.transfer.split('@')[0]);
+      if (rt) recurringTransferForm(rt);
+    } else if (d.recurringTransfer) {
+      const rt = S.state.recurringTransfers.find((x) => x.id === d.recurringTransfer);
+      if (rt) recurringTransferForm(rt);
     } else if (d.recurring) {
       const rec = S.state.recurring.find((r) => r.id === d.recurring);
       if (rec) recurringForm(rec);

@@ -69,6 +69,44 @@
     return out;
   }
 
+  // Ce que `from` doit à l'autre au titre des charges fixes d'un mois donné
+  // (sa part moins ce qu'il/elle a déjà payé soi-même), jamais négatif.
+  function fixedChargesDebt(state, month, from) {
+    const rs = recurringSummary(state, month);
+    return Math.max(0, rs.share[from] - rs.paid[from]);
+  }
+
+  // Occurrences mensuelles des remboursements automatiques jusqu'au mois `upTo`.
+  // `auto` = le montant est recalculé chaque mois à partir des charges fixes.
+  function expandRecurringTransfers(state, upTo) {
+    const out = [];
+    for (const r of state.recurringTransfers || []) {
+      const last = r.endMonth && r.endMonth < upTo ? r.endMonth : upTo;
+      if (r.startMonth > last) continue;
+      for (const month of monthsRange(r.startMonth, last)) {
+        const amount = r.auto ? fixedChargesDebt(state, month, r.from) : r.amount;
+        if (!(amount > 0)) continue;
+        const day = Math.min(r.day || 1, daysInMonth(month));
+        out.push({
+          id: `${r.id}@${month}`,
+          recurringTransferId: r.id,
+          date: `${month}-${pad(day)}`,
+          from: r.from,
+          to: r.to,
+          amount,
+          note: r.note || '',
+        });
+      }
+    }
+    return out;
+  }
+
+  function allTransfers(state, upTo) {
+    return state.transfers
+      .filter((t) => monthKey(t.date) <= upTo)
+      .concat(expandRecurringTransfers(state, upTo));
+  }
+
   // Dépenses ponctuelles + occurrences des charges fixes, jusqu'au mois `upTo`.
   function allExpenses(state, upTo) {
     const real = state.expenses.filter((e) => monthKey(e.date) <= upTo);
@@ -77,7 +115,8 @@
 
   // Solde du couple : net.a > 0 signifie que b doit net.a à a.
   // Toutes les dépenses saisies comptent (même datées plus tard) ; les charges
-  // fixes ne comptent que jusqu'au mois `upTo` (en général le mois en cours).
+  // fixes et remboursements automatiques ne comptent que jusqu'au mois `upTo`
+  // (en général le mois en cours).
   function computeBalance(state, upTo) {
     const net = { a: 0, b: 0 };
     for (const e of state.expenses.concat(expandRecurring(state.recurring, upTo))) {
@@ -86,7 +125,7 @@
       net.a -= s.a;
       net.b -= s.b;
     }
-    for (const t of state.transfers) {
+    for (const t of state.transfers.concat(expandRecurringTransfers(state, upTo))) {
       net[t.from] += t.amount;
       net[t.to] -= t.amount;
     }
@@ -253,6 +292,9 @@
 
   const api = {
     analyzeMonth,
+    fixedChargesDebt,
+    expandRecurringTransfers,
+    allTransfers,
     pad,
     monthKey,
     todayISO,

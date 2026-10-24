@@ -65,6 +65,22 @@ create table public.budg_transfers (
   note text not null default ''
 );
 
+-- Remboursements automatiques mensuels : montant fixe, ou `auto` = la part
+-- des charges fixes due par from_person, recalculée chaque mois par l'appli.
+create table public.budg_recurring_transfers (
+  id uuid primary key,
+  household_id uuid not null references public.budg_households (id) on delete cascade,
+  from_person text not null check (from_person in ('a', 'b')),
+  to_person text not null check (to_person in ('a', 'b') and to_person <> from_person),
+  auto boolean not null default false,
+  amount int check (amount > 0),
+  day int not null default 1 check (day between 1 and 31),
+  start_month text not null check (start_month ~ '^\d{4}-\d{2}$'),
+  end_month text check (end_month ~ '^\d{4}-\d{2}$'),
+  note text not null default '',
+  check (auto or amount is not null)
+);
+
 create index on public.budg_categories (household_id);
 create index on public.budg_expenses (household_id, date);
 create index on public.budg_expenses (category_id);
@@ -72,6 +88,7 @@ create index on public.budg_expenses (created_by);
 create index on public.budg_recurring (household_id);
 create index on public.budg_recurring (category_id);
 create index on public.budg_transfers (household_id);
+create index on public.budg_recurring_transfers (household_id);
 
 -- Appartenance au couple (security definer pour éviter la récursion RLS sur budg_members).
 -- Rangée dans un schéma non exposé par l'API REST.
@@ -97,6 +114,7 @@ alter table public.budg_categories enable row level security;
 alter table public.budg_expenses enable row level security;
 alter table public.budg_recurring enable row level security;
 alter table public.budg_transfers enable row level security;
+alter table public.budg_recurring_transfers enable row level security;
 
 create policy "membres : lecture" on public.budg_households
   for select to authenticated using (budg_private.budg_is_member(id));
@@ -116,6 +134,9 @@ create policy "membres : tout" on public.budg_recurring
   for all to authenticated
   using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
 create policy "membres : tout" on public.budg_transfers
+  for all to authenticated
+  using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
+create policy "membres : tout" on public.budg_recurring_transfers
   for all to authenticated
   using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
 
@@ -184,4 +205,5 @@ alter publication supabase_realtime add table
   public.budg_categories,
   public.budg_expenses,
   public.budg_recurring,
-  public.budg_transfers;
+  public.budg_transfers,
+  public.budg_recurring_transfers;

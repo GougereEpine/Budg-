@@ -56,6 +56,7 @@
       expenses: [],
       recurring: [],
       transfers: [],
+      recurringTransfers: [],
     };
   }
 
@@ -149,6 +150,31 @@
         note: r.note,
       }),
     },
+    recurringTransfers: {
+      table: 'budg_recurring_transfers',
+      toRow: (x) => ({
+        id: x.id,
+        from_person: x.from,
+        to_person: x.to,
+        auto: x.auto,
+        amount: x.auto ? null : x.amount,
+        day: x.day,
+        start_month: x.startMonth,
+        end_month: x.endMonth || null,
+        note: x.note || '',
+      }),
+      fromRow: (r) => ({
+        id: r.id,
+        from: r.from_person,
+        to: r.to_person,
+        auto: r.auto,
+        amount: r.amount,
+        day: r.day,
+        startMonth: r.start_month,
+        endMonth: r.end_month,
+        note: r.note,
+      }),
+    },
   };
 
   const Store = {
@@ -184,6 +210,7 @@
       if (savedMode === 'local') {
         this.mode = 'local';
         this.state = readJSON(LOCAL_KEY);
+        if (this.state && !this.state.recurringTransfers) this.state.recurringTransfers = [];
         return this.state ? 'ready' : 'welcome';
       }
       if (!this.cloudConfigured()) return 'welcome';
@@ -250,7 +277,9 @@
       this.me = data.person;
 
       const cache = readJSON(CACHE_KEY);
-      if (cache && cache.householdId === this.householdId) this.state = cache.state;
+      if (cache && cache.householdId === this.householdId) {
+        this.state = { recurringTransfers: [], ...cache.state };
+      }
       await this.fetchAll();
       this.subscribe();
       return 'ready';
@@ -278,15 +307,16 @@
     async fetchAll() {
       const hid = this.householdId;
       const q = (table) => this.client.from(table).select('*').eq('household_id', hid);
-      const [house, members, cats, exps, recs, trs] = await Promise.all([
+      const [house, members, cats, exps, recs, trs, rtrs] = await Promise.all([
         this.client.from('budg_households').select('*').eq('id', hid).single(),
         this.client.from('budg_members').select('person').eq('household_id', hid),
         q('budg_categories').order('position'),
         q('budg_expenses'),
         q('budg_recurring'),
         q('budg_transfers'),
+        q('budg_recurring_transfers'),
       ]);
-      for (const res of [house, members, cats, exps, recs, trs]) if (res.error) throw res.error;
+      for (const res of [house, members, cats, exps, recs, trs, rtrs]) if (res.error) throw res.error;
 
       const h = house.data;
       this.inviteCode = h.invite_code;
@@ -301,6 +331,7 @@
         expenses: exps.data.map(TABLES.expenses.fromRow),
         recurring: recs.data.map(TABLES.recurring.fromRow),
         transfers: trs.data.map(TABLES.transfers.fromRow),
+        recurringTransfers: rtrs.data.map(TABLES.recurringTransfers.fromRow),
       };
       this.emit();
     },
@@ -404,12 +435,12 @@
         throw new Error('Fichier de sauvegarde invalide');
       }
       if (this.mode === 'local') {
-        this.state = data;
+        this.state = { recurringTransfers: [], ...data };
         this.emit();
         return;
       }
       const hid = this.householdId;
-      for (const kind of ['categories', 'expenses', 'recurring', 'transfers']) {
+      for (const kind of ['categories', 'expenses', 'recurring', 'transfers', 'recurringTransfers']) {
         const rows = (data[kind] || []).map((x) => ({ ...TABLES[kind].toRow(x), household_id: hid }));
         if (!rows.length) continue;
         const { error } = await this.client.from(TABLES[kind].table).upsert(rows);
