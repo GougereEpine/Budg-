@@ -38,6 +38,8 @@ create table public.budg_expenses (
   payer text not null check (payer in ('a', 'b')),
   category_id uuid references public.budg_categories (id) on delete set null,
   split int not null check (split between 0 and 100),
+  share_a int check (share_a >= 0 and share_a <= amount), -- montant précis pour 'a' (sinon split en %)
+  by_usage boolean not null default false, -- répartie selon l'usage de la voiture du mois
   created_by uuid default auth.uid() references auth.users (id) on delete set null,
   created_at timestamptz not null default now()
 );
@@ -50,6 +52,8 @@ create table public.budg_recurring (
   payer text not null check (payer in ('a', 'b')),
   category_id uuid references public.budg_categories (id) on delete set null,
   split int not null check (split between 0 and 100),
+  share_a int check (share_a >= 0 and share_a <= amount),
+  by_usage boolean not null default false,
   day int not null default 1 check (day between 1 and 31),
   start_month text not null check (start_month ~ '^\d{4}-\d{2}$'),
   end_month text check (end_month ~ '^\d{4}-\d{2}$')
@@ -79,6 +83,14 @@ create table public.budg_recurring_transfers (
   end_month text check (end_month ~ '^\d{4}-\d{2}$'),
   note text not null default '',
   check (auto or amount is not null)
+);
+
+-- Usage de la voiture par mois : % d'utilisation par la personne 'a'.
+create table public.budg_car_usage (
+  household_id uuid not null references public.budg_households (id) on delete cascade,
+  month text not null check (month ~ '^\d{4}-\d{2}$'),
+  split int not null check (split between 0 and 100),
+  primary key (household_id, month)
 );
 
 create index on public.budg_categories (household_id);
@@ -115,6 +127,7 @@ alter table public.budg_expenses enable row level security;
 alter table public.budg_recurring enable row level security;
 alter table public.budg_transfers enable row level security;
 alter table public.budg_recurring_transfers enable row level security;
+alter table public.budg_car_usage enable row level security;
 
 create policy "membres : lecture" on public.budg_households
   for select to authenticated using (budg_private.budg_is_member(id));
@@ -137,6 +150,9 @@ create policy "membres : tout" on public.budg_transfers
   for all to authenticated
   using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
 create policy "membres : tout" on public.budg_recurring_transfers
+  for all to authenticated
+  using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
+create policy "membres : tout" on public.budg_car_usage
   for all to authenticated
   using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
 
@@ -206,4 +222,5 @@ alter publication supabase_realtime add table
   public.budg_expenses,
   public.budg_recurring,
   public.budg_transfers,
-  public.budg_recurring_transfers;
+  public.budg_recurring_transfers,
+  public.budg_car_usage;

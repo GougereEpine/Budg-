@@ -83,7 +83,9 @@
     return [...S.state.categories].sort((x, y) => x.position - y.position);
   }
 
-  function splitText(split) {
+  function splitText(split, byUsage, shareA, amount) {
+    if (byUsage) return `🚗 ${split}/${100 - split}`;
+    if (shareA != null) return `${esc(name('a'))} ${euro(shareA)} · ${esc(name('b'))} ${euro(amount - shareA)}`;
     if (split === 100) return `pour ${name('a')}`;
     if (split === 0) return `pour ${name('b')}`;
     return `${split}/${100 - split}`;
@@ -196,10 +198,23 @@
       </label>`;
   }
 
-  function splitField(split) {
+  function usageHint(month) {
+    const u = L.carUsageFor(S.state, month);
+    const txt = `${name('a')} ${u.split} % · ${name('b')} ${100 - u.split} %`;
+    return u.isSet
+      ? `Usage de la voiture ce mois-ci : <b>${esc(txt)}</b> (modifiable dans Analyse).`
+      : `Usage de ${esc(monthLabel(month))} pas encore indiqué : <b>${esc(txt)}</b> en attendant. Réglez-le dans Analyse, même en fin de mois.`;
+  }
+
+  // `item` : { split, byUsage, shareA } de la dépense ou charge fixe.
+  function splitField(item, month) {
+    const { split, byUsage, shareA } = item;
     const d = S.state.defaultSplit;
+    const inEuros = shareA != null && !byUsage;
     let mode = 'custom';
-    if (split === d) mode = 'default';
+    if (byUsage) mode = 'car';
+    else if (inEuros) mode = 'custom';
+    else if (split === d) mode = 'default';
     else if (split === 50) mode = '50';
     else if (split === 100) mode = 'a';
     else if (split === 0) mode = 'b';
@@ -212,22 +227,90 @@
           ${opt('a', `Tout pour ${name('a')}`)}
           ${opt('b', `Tout pour ${name('b')}`)}
           ${opt('custom', 'Personnalisée…')}
+          ${opt('car', "🚗 Selon l'usage de la voiture (essence…)")}
         </select>
       </label>
-      <label class="field" data-custom ${mode === 'custom' ? '' : 'hidden'}>
-        <span>Part de ${esc(name('a'))} (%) — ${esc(name('b'))} paie le reste</span>
-        <input name="splitCustom" type="number" min="0" max="100" step="1" value="${split}">
-      </label>`;
+      <p class="hint" data-usage-hint ${mode === 'car' ? '' : 'hidden'}>${usageHint(month)}</p>
+      <div data-custom ${mode === 'custom' ? '' : 'hidden'}>
+        <div class="seg" style="margin-bottom:10px">
+          <label><input type="radio" name="customUnit" value="pct" ${inEuros ? '' : 'checked'}><span>En %</span></label>
+          <label><input type="radio" name="customUnit" value="eur" ${inEuros ? 'checked' : ''}><span>En €</span></label>
+        </div>
+        <label class="field" data-unit-pct ${inEuros ? 'hidden' : ''}>
+          <span>Part de ${esc(name('a'))} (%) — ${esc(name('b'))} paie le reste</span>
+          <input name="splitCustom" type="number" min="0" max="100" step="1" value="${split}">
+        </label>
+        <label class="field" data-unit-eur ${inEuros ? '' : 'hidden'}>
+          <span>Montant pour ${esc(name('a'))} (€) — ${esc(name('b'))} paie le reste</span>
+          <input name="shareCustom" inputmode="decimal" placeholder="0 €" value="${inEuros ? amountValue(shareA) : ''}" autocomplete="off">
+        </label>
+        <p class="hint" data-split-preview></p>
+      </div>`;
   }
 
-  function bindSplitField(form) {
+  // `getMonth` donne le mois concerné (pour afficher l'usage de la voiture).
+  function bindSplitField(form, getMonth) {
     const sel = form.querySelector('[name=splitMode]');
     const custom = form.querySelector('[data-custom]');
-    sel.onchange = () => (custom.hidden = sel.value !== 'custom');
+    const hint = form.querySelector('[data-usage-hint]');
+    const preview = form.querySelector('[data-split-preview]');
+    const sync = () => {
+      custom.hidden = sel.value !== 'custom';
+      hint.hidden = sel.value !== 'car';
+      hint.innerHTML = usageHint(getMonth());
+      const eur = form.customUnit.value === 'eur';
+      form.querySelector('[data-unit-pct]').hidden = eur;
+      form.querySelector('[data-unit-eur]').hidden = !eur;
+      // Aperçu en euros de la part de chacun.
+      const amount = L.parseAmount(form.amount.value);
+      let text = '';
+      if (amount > 0) {
+        const shareA = readShareA(form);
+        if (shareA != null && shareA > amount) text = `⚠️ Plus que le montant total (${euro(amount)})`;
+        else {
+          const s = shareA != null ? { a: shareA, b: amount - shareA } : L.shareOf(amount, readSplit(form, getMonth()));
+          text = `${esc(name('a'))} <b>${euro(s.a)}</b> · ${esc(name('b'))} <b>${euro(s.b)}</b>`;
+        }
+      }
+      preview.innerHTML = text;
+    };
+    sel.onchange = sync;
+    form.querySelectorAll('[name=customUnit],[name=splitCustom],[name=shareCustom],[name=amount]').forEach((i) => {
+      i.addEventListener('input', sync);
+      i.addEventListener('change', sync);
+    });
+    sync();
+    return sync;
   }
 
-  function readSplit(form) {
+  function readByUsage(form) {
+    return form.splitMode.value === 'car';
+  }
+
+  // Montant précis pour a (centimes) en mode personnalisé « en € », sinon null.
+  function readShareA(form) {
+    if (form.splitMode.value !== 'custom' || form.customUnit.value !== 'eur') return null;
+    const v = form.shareCustom.value.trim();
+    if (v === '') return null;
+    const cents = L.parseAmount(v);
+    return Number.isFinite(cents) ? cents : null;
+  }
+
+  // Lit la répartition du formulaire ; renvoie null (et affiche l'erreur) si invalide.
+  function readSplitting(form, amount, month) {
+    const byUsage = readByUsage(form);
+    const shareA = readShareA(form);
+    if (form.splitMode.value === 'custom' && form.customUnit.value === 'eur') {
+      if (shareA == null) return fail(form, `Montant pour ${name('a')} invalide`) && null;
+      if (shareA > amount) return fail(form, `Le montant pour ${name('a')} dépasse le total`) && null;
+      return { split: Math.round((shareA / amount) * 100), shareA, byUsage: false };
+    }
+    return { split: readSplit(form, month), shareA: null, byUsage };
+  }
+
+  function readSplit(form, month) {
     const mode = form.splitMode.value;
+    if (mode === 'car') return L.carUsageFor(S.state, month).split;
     if (mode === 'default') return S.state.defaultSplit;
     if (mode === '50') return 50;
     if (mode === 'a') return 100;
@@ -271,23 +354,45 @@
         <label class="field"><span>Date</span><input type="date" name="date" value="${e.date}" required></label>
         ${categoryField(e.categoryId)}
       </div>
-      ${splitField(e.split)}`,
+      ${splitField(e, L.monthKey(e.date))}`,
       {
         onOpen: (form) => {
-          bindSplitField(form);
-          if (!existing) form.amount.focus();
+          const month = () => L.monthKey(form.date.value || today());
+          const sync = bindSplitField(form, month);
+          form.date.onchange = sync;
+          // Nouvelle dépense : on reprend la répartition de la dernière dépense de la catégorie
+          // (ex. « Transport » toujours selon l'usage de la voiture).
+          if (!existing) {
+            form.categoryId.onchange = () => {
+              const last = [...S.state.expenses]
+                .filter((x) => x.categoryId === form.categoryId.value)
+                .sort((x, y) => (x.date < y.date ? 1 : -1))[0];
+              if (!last) return;
+              const d = S.state.defaultSplit;
+              form.splitMode.value = last.byUsage
+                ? 'car'
+                : last.split === d ? 'default' : last.split === 50 ? '50' : last.split === 100 ? 'a' : last.split === 0 ? 'b' : 'custom';
+              if (!form.splitMode.value) form.splitMode.value = 'custom';
+              form.splitCustom.value = last.split;
+              form.customUnit.value = 'pct';
+              sync();
+            };
+            form.amount.focus();
+          }
         },
         onSubmit: async (form) => {
           const amount = readAmount(form);
           if (!amount) return fail(form, 'Montant invalide');
+          const splitting = readSplitting(form, amount, L.monthKey(form.date.value));
+          if (!splitting) return false;
           await S.save('expenses', {
             ...e,
+            ...splitting,
             amount,
             label: form.label.value.trim(),
             payer: form.payer.value,
             date: form.date.value,
             categoryId: form.categoryId.value || null,
-            split: readSplit(form),
           });
           toast(existing ? 'Dépense modifiée' : 'Dépense ajoutée');
         },
@@ -321,7 +426,7 @@
       </label>
       ${payerField(r.payer, 'payer', 'Prélevé sur le compte de')}
       ${categoryField(r.categoryId)}
-      ${splitField(r.split)}
+      ${splitField(r, currentMonth())}
       <div class="row">
         <label class="field"><span>Jour du prélèvement</span>
           <input type="number" name="day" min="1" max="31" value="${r.day}" required></label>
@@ -331,7 +436,7 @@
       <label class="field"><span>Jusqu'à (vide = toujours en cours)</span>
         <input type="month" name="endMonth" value="${r.endMonth || ''}"></label>`,
       {
-        onOpen: (form) => bindSplitField(form),
+        onOpen: (form) => bindSplitField(form, currentMonth),
         onSubmit: async (form) => {
           const amount = readAmount(form);
           if (!amount) return fail(form, 'Montant invalide');
@@ -339,13 +444,15 @@
           const endMonth = form.endMonth.value || null;
           if (!/^\d{4}-\d{2}$/.test(startMonth)) return fail(form, 'Mois de début invalide');
           if (endMonth && endMonth < startMonth) return fail(form, 'La fin doit être après le début');
+          const splitting = readSplitting(form, amount, currentMonth());
+          if (!splitting) return false;
           await S.save('recurring', {
             ...r,
+            ...splitting,
             amount,
             label: form.label.value.trim(),
             payer: form.payer.value,
             categoryId: form.categoryId.value || null,
-            split: readSplit(form),
             day: Math.min(31, Math.max(1, Math.round(Number(form.day.value)) || 1)),
             startMonth,
             endMonth,
@@ -761,7 +868,7 @@
         <div class="emoji">${esc(c.icon)}</div>
         <div class="body">
           <div class="title">${tag}${esc(e.label)}</div>
-          <div class="sub">${esc(c.name)} · ${splitText(e.split)}</div>
+          <div class="sub">${esc(c.name)} · ${splitText(e.split, e.byUsage, e.shareA, e.amount)}</div>
         </div>
         <div class="right">
           <div class="amt num">${euro(e.amount)}</div>
@@ -782,6 +889,14 @@
       </div>`;
   }
 
+  // « Maxime 512 € · Lola 512 € » : la part en euros de chacun pour un montant.
+  function sharesLine(s) {
+    return `<div class="shares">
+      <span><i class="dot a"></i>${esc(name('a'))} <b class="num">${euro(s.a)}</b></span>
+      <span><i class="dot b"></i>${esc(name('b'))} <b class="num">${euro(s.b)}</b></span>
+    </div>`;
+  }
+
   function splitBar(values, labelA, labelB) {
     const total = values.a + values.b;
     const pa = total ? (values.a / total) * 100 : 50;
@@ -794,6 +909,87 @@
   }
 
   // ---------- Onglets ----------
+
+  // ---------- Usage de la voiture ----------
+
+  function usesCar() {
+    const st = S.state;
+    return st.expenses.some((e) => e.byUsage) || st.recurring.some((r) => r.byUsage) || Object.keys(st.carUsage).length > 0;
+  }
+
+  function carReminder(month) {
+    const car = L.carSummary(S.state, month);
+    if (!car.expenses.length || car.usage.isSet) return '';
+    return `<div class="alert trend" data-goto="budget" style="cursor:pointer"><span class="ico">🚗</span><div>
+      <strong>Usage de la voiture de ${esc(monthLabel(month))} à indiquer</strong>
+      ${euro(car.total)} de dépenses voiture réparties en attendant à ${car.usage.split}/${100 - car.usage.split}. Touchez pour régler →</div></div>`;
+  }
+
+  function carCard(month) {
+    if (!usesCar()) return '';
+    const car = L.carSummary(S.state, month);
+    const u = car.usage;
+    const status = u.isSet
+      ? ''
+      : `<p class="hint" style="margin:0 0 10px">Pas encore indiqué pour ce mois : ${
+          u.from ? `on reprend ${esc(monthLabel(u.from))}` : 'on utilise la répartition par défaut'
+        } (${u.split}/${100 - u.split}).</p>`;
+    return `
+      <h2>🚗 Voiture</h2>
+      <form class="card" id="car-usage">
+        <div class="small muted" style="margin-bottom:6px">Qui a utilisé la voiture en ${esc(monthLabel(month))} ?</div>
+        ${status}
+        <input type="range" name="usage" min="0" max="100" step="5" value="${u.split}" aria-label="Part d'usage de ${esc(name('a'))}">
+        <div class="legend" style="margin:4px 0 10px">
+          <span><i class="dot a"></i>${esc(name('a'))} <b data-ua>${u.split}</b> %</span>
+          <span>${esc(name('b'))} <b data-ub>${100 - u.split}</b> %<i class="dot b" style="margin-left:4px"></i></span>
+        </div>
+        <details class="small" style="margin-bottom:12px">
+          <summary class="muted">Calculer avec les kilomètres</summary>
+          <div class="row" style="margin-top:8px">
+            <input name="kmA" inputmode="numeric" placeholder="km ${esc(name('a'))}">
+            <input name="kmB" inputmode="numeric" placeholder="km ${esc(name('b'))}">
+          </div>
+        </details>
+        <div class="small muted">Dépenses voiture du mois (essence, péage…) : <b class="num" data-car-total>${euro(car.total)}</b></div>
+        <div data-car-shares>${car.total ? sharesLine(L.shareOf(car.total, u.split)) : ''}</div>
+        <button class="btn primary block" style="margin-top:12px">Enregistrer l'usage de ${esc(monthLabel(month, true))}</button>
+      </form>`;
+  }
+
+  function bindCarCard(month) {
+    const form = view.querySelector('#car-usage');
+    if (!form) return;
+    const car = L.carSummary(S.state, month);
+    const update = () => {
+      const v = Number(form.usage.value);
+      form.querySelector('[data-ua]').textContent = v;
+      form.querySelector('[data-ub]').textContent = 100 - v;
+      // Aperçu : total des dépenses voiture réparti avec le % affiché.
+      form.querySelector('[data-car-shares]').innerHTML = car.total ? sharesLine(L.shareOf(car.total, v)) : '';
+    };
+    form.usage.oninput = update;
+    const km = () => {
+      const a = Number(form.kmA.value.replace(/\s/g, ''));
+      const b = Number(form.kmB.value.replace(/\s/g, ''));
+      if (a >= 0 && b >= 0 && a + b > 0) {
+        form.usage.value = Math.round((a / (a + b)) * 100);
+        // Le curseur avance de 5 en 5 : on affiche la valeur exacte calculée.
+        form.usage.dataset.exact = Math.round((a / (a + b)) * 100);
+        update();
+        form.querySelector('[data-ua]').textContent = form.usage.dataset.exact;
+        form.querySelector('[data-ub]').textContent = 100 - form.usage.dataset.exact;
+        form.querySelector('[data-car-shares]').innerHTML = car.total ? sharesLine(L.shareOf(car.total, Number(form.usage.dataset.exact))) : '';
+      }
+    };
+    form.kmA.oninput = form.kmB.oninput = km;
+    form.usage.addEventListener('input', () => delete form.usage.dataset.exact);
+    form.onsubmit = (ev) => {
+      ev.preventDefault();
+      const v = form.usage.dataset.exact != null ? Number(form.usage.dataset.exact) : Number(form.usage.value);
+      run(S.setCarUsage(month, v), `Usage enregistré : ${name('a')} ${v} % · ${name('b')} ${100 - v} %`);
+    };
+  }
 
   function renderHome() {
     const state = S.state;
@@ -842,6 +1038,7 @@
       </div>
       ${invite}
       ${balanceHtml}
+      ${carReminder(cur)}
       ${alertsHtml ? `<h2>Alertes de ${monthLabel(cur, true)}</h2>${alertsHtml}` : ''}
       <h2>Ce mois-ci</h2>
       <div class="stats">
@@ -939,7 +1136,8 @@
           <div class="emoji">${esc(c.icon)}</div>
           <div class="body">
             <div class="title">${esc(r.label)}</div>
-            <div class="sub">${esc(c.name)} · ${esc(when)} · ${splitText(r.split)}</div>
+            <div class="sub">${esc(c.name)} · ${esc(when)}${r.byUsage ? ' · 🚗 usage voiture' : ''}</div>
+            ${sharesLine(L.sharesOf(r.byUsage ? { ...r, split: L.carUsageFor(state, cur).split } : r))}
           </div>
           <div class="right">
             <div class="amt num">${euro(r.amount)}<span class="small muted">/mois</span></div>
@@ -982,7 +1180,15 @@
         <div class="small muted">Total par mois</div>
         <div style="font-size:1.8rem;font-weight:700" class="num">${euro(rs.total)}</div>
         ${rs.total ? splitBar(rs.paid, `paie ${euro(rs.paid.a)}`, `paie ${euro(rs.paid.b)}`) : ''}
-        ${rs.total ? `<p class="small muted" style="margin:8px 0 0">Parts : ${esc(name('a'))} ${euro(rs.share.a)} · ${esc(name('b'))} ${euro(rs.share.b)}. ${balanceText}</p>` : ''}
+        ${
+          rs.total
+            ? `<div class="share-cols">
+                 <div><span class="small muted"><i class="dot a"></i>Part de ${esc(name('a'))}</span><b class="num">${euro(rs.share.a)}</b></div>
+                 <div><span class="small muted"><i class="dot b"></i>Part de ${esc(name('b'))}</span><b class="num">${euro(rs.share.b)}</b></div>
+               </div>
+               <p class="small muted" style="margin:8px 0 0">${balanceText}</p>`
+            : ''
+        }
       </div>
       <div class="card list">
         ${active.length ? active.map(item).join('') : `<div class="empty">Ajoutez le loyer, les assurances, les abonnements…<br><br><button class="btn primary" data-add-recurring>＋ Ajouter une charge fixe</button></div>`}
@@ -1083,6 +1289,7 @@
       </div>
 
       ${an.alerts.length ? `<h2>Alertes</h2>${an.alerts.map(alertHtml).join('')}` : ''}
+      ${carCard(ui.month)}
 
       <h2>Budgets par catégorie</h2>
       <div class="card" style="padding-top:4px;padding-bottom:4px">
@@ -1101,6 +1308,8 @@
         ${splitBar(an.share, euro(an.share.a), euro(an.share.b))}
         ${fairText ? `<p class="small" style="margin:12px 0 0">${fairText}</p>` : ''}
       </div>`;
+
+    bindCarCard(ui.month);
 
     view.querySelector('[data-edit-budgets]').onclick = () => {
       ui.tab = 'settings';

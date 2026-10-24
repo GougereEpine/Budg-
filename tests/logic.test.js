@@ -207,3 +207,46 @@ test('remboursement automatique à montant fixe, avec fin', () => {
   assert.equal(bal.amount, 10000);
   assert.equal(L.allTransfers(s, '2026-09').length, 1);
 });
+
+test('essence : répartition selon l\'usage de la voiture du mois', () => {
+  const s = baseState({
+    defaultSplit: 50,
+    expenses: [
+      { id: 'e1', date: '2026-09-05', label: 'Essence', amount: 10000, payer: 'a', categoryId: null, split: 50, byUsage: true },
+      { id: 'e2', date: '2026-10-05', label: 'Essence', amount: 8000, payer: 'a', categoryId: null, split: 50, byUsage: true },
+      { id: 'e3', date: '2026-10-06', label: 'Péage', amount: 2000, payer: 'b', categoryId: null, split: 50, byUsage: true },
+    ],
+    recurring: [
+      { id: 'assu', label: 'Assurance auto', amount: 6000, payer: 'a', categoryId: null, split: 50, day: 1, startMonth: '2026-10', endMonth: null, byUsage: true },
+    ],
+    carUsage: { '2026-09': 80 },
+  });
+  // Octobre pas encore renseigné : on reprend septembre (80 %).
+  assert.deepEqual(L.carUsageFor(s, '2026-10'), { split: 80, isSet: false, from: '2026-09' });
+  assert.equal(L.carUsageFor(s, '2026-08').split, 50);
+
+  s.carUsage['2026-10'] = 70;
+  const car = L.carSummary(s, '2026-10');
+  assert.equal(car.usage.isSet, true);
+  assert.equal(car.total, 16000); // essence + péage + assurance
+  assert.deepEqual(car.share, { a: 11200, b: 4800 });
+
+  // Septembre : Max paie 100, part de Lola 20. Octobre : Max paie 80 + 60, Lola 20 ;
+  // part de Lola 30 % de 160 = 48 -> Lola doit 48 - 20 = 28. Total : 20 + 28 = 48.
+  const bal = L.computeBalance(s, '2026-10');
+  assert.equal(bal.debtor, 'b');
+  assert.equal(bal.amount, 4800);
+  // La charge fixe suit aussi l'usage dans les remboursements automatiques.
+  assert.equal(L.fixedChargesDebt(s, '2026-10', 'b'), 1800);
+});
+
+test('répartition par montant précis plutôt qu\'en %', () => {
+  const s = baseState({
+    expenses: [{ id: '1', date: '2026-10-02', label: 'Ilevia', amount: 4699, payer: 'a', categoryId: null, split: 21, shareA: 1000 }],
+    recurring: [{ id: 'r', label: 'Internet', amount: 4699, payer: 'a', categoryId: null, split: 83, shareA: 3900, day: 1, startMonth: '2026-10', endMonth: null }],
+  });
+  assert.deepEqual(L.sharesOf(s.expenses[0]), { a: 1000, b: 3699 });
+  // Lola doit 36,99 (dépense) + 7,99 (charge fixe) — sans arrondi en %.
+  assert.equal(L.computeBalance(s, '2026-10').amount, 3699 + 799);
+  assert.deepEqual(L.recurringSummary(s, '2026-10').share, { a: 3900, b: 799 });
+});

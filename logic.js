@@ -46,6 +46,32 @@
     return { a, b: amount - a };
   }
 
+  // Parts d'une dépense : montant précis pour a (`shareA`, en centimes) s'il est
+  // renseigné, sinon le pourcentage `split`.
+  function sharesOf(e) {
+    if (e.shareA != null && !e.byUsage) return { a: e.shareA, b: e.amount - e.shareA };
+    return shareOf(e.amount, e.split);
+  }
+
+  // Usage de la voiture : % d'utilisation par a pour un mois. Si le mois n'est pas
+  // renseigné, on reprend le dernier mois renseigné avant, sinon la répartition
+  // par défaut du couple. `isSet` indique si le mois lui-même a été renseigné.
+  function carUsageFor(state, month) {
+    const usage = state.carUsage || {};
+    if (usage[month] != null) return { split: usage[month], isSet: true, from: month };
+    const before = Object.keys(usage).filter((m) => m < month).sort();
+    if (before.length) {
+      const m = before[before.length - 1];
+      return { split: usage[m], isSet: false, from: m };
+    }
+    return { split: state.defaultSplit, isSet: false, from: null };
+  }
+
+  // Une dépense « selon l'usage de la voiture » prend le % du mois où elle a lieu.
+  function withUsage(state, e) {
+    return e.byUsage ? { ...e, split: carUsageFor(state, monthKey(e.date)).split } : e;
+  }
+
   // Génère les occurrences mensuelles des charges fixes jusqu'au mois `upTo` inclus.
   function expandRecurring(recurring, upTo) {
     const out = [];
@@ -63,6 +89,8 @@
           payer: r.payer,
           categoryId: r.categoryId,
           split: r.split,
+          shareA: r.shareA,
+          byUsage: Boolean(r.byUsage),
         });
       }
     }
@@ -110,7 +138,7 @@
   // Dépenses ponctuelles + occurrences des charges fixes, jusqu'au mois `upTo`.
   function allExpenses(state, upTo) {
     const real = state.expenses.filter((e) => monthKey(e.date) <= upTo);
-    return real.concat(expandRecurring(state.recurring, upTo));
+    return real.concat(expandRecurring(state.recurring, upTo)).map((e) => withUsage(state, e));
   }
 
   // Solde du couple : net.a > 0 signifie que b doit net.a à a.
@@ -119,8 +147,9 @@
   // (en général le mois en cours).
   function computeBalance(state, upTo) {
     const net = { a: 0, b: 0 };
-    for (const e of state.expenses.concat(expandRecurring(state.recurring, upTo))) {
-      const s = shareOf(e.amount, e.split);
+    for (const raw of state.expenses.concat(expandRecurring(state.recurring, upTo))) {
+      const e = withUsage(state, raw);
+      const s = sharesOf(e);
       net[e.payer] += e.amount;
       net.a -= s.a;
       net.b -= s.b;
@@ -150,7 +179,7 @@
     for (const e of expenses) {
       total += e.amount;
       paid[e.payer] += e.amount;
-      const s = shareOf(e.amount, e.split);
+      const s = sharesOf(e);
       share.a += s.a;
       share.b += s.b;
       byCategory[e.categoryId] = (byCategory[e.categoryId] || 0) + e.amount;
@@ -175,11 +204,27 @@
     for (const r of active) {
       total += r.amount;
       paid[r.payer] += r.amount;
-      const s = shareOf(r.amount, r.split);
+      const s = sharesOf(r.byUsage ? { ...r, split: carUsageFor(state, month).split } : r);
       share.a += s.a;
       share.b += s.b;
     }
     return { active, total, paid, share };
+  }
+
+  // Dépenses du mois réparties selon l'usage de la voiture (essence, péage…).
+  function carSummary(state, month) {
+    const usage = carUsageFor(state, month);
+    const expenses = monthExpenses(state, month).filter((e) => e.byUsage);
+    const total = expenses.reduce((sum, e) => sum + e.amount, 0);
+    const paid = { a: 0, b: 0 };
+    const share = { a: 0, b: 0 };
+    for (const e of expenses) {
+      paid[e.payer] += e.amount;
+      const s = sharesOf(e);
+      share.a += s.a;
+      share.b += s.b;
+    }
+    return { usage, expenses, total, paid, share };
   }
 
   // Répartition proportionnelle aux revenus (en % pour a), arrondie à l'unité.
@@ -292,6 +337,8 @@
 
   const api = {
     analyzeMonth,
+    carUsageFor,
+    carSummary,
     fixedChargesDebt,
     expandRecurringTransfers,
     allTransfers,
@@ -303,6 +350,7 @@
     daysInMonth,
     parseAmount,
     shareOf,
+    sharesOf,
     expandRecurring,
     allExpenses,
     computeBalance,

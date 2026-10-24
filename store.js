@@ -57,6 +57,7 @@
       recurring: [],
       transfers: [],
       recurringTransfers: [],
+      carUsage: {},
     };
   }
 
@@ -94,6 +95,8 @@
         payer: e.payer,
         category_id: e.categoryId,
         split: e.split,
+        share_a: e.shareA == null ? null : e.shareA,
+        by_usage: Boolean(e.byUsage),
       }),
       fromRow: (r) => ({
         id: r.id,
@@ -103,6 +106,8 @@
         payer: r.payer,
         categoryId: r.category_id,
         split: r.split,
+        shareA: r.share_a,
+        byUsage: r.by_usage,
         createdBy: r.created_by,
       }),
     },
@@ -115,6 +120,8 @@
         payer: x.payer,
         category_id: x.categoryId,
         split: x.split,
+        share_a: x.shareA == null ? null : x.shareA,
+        by_usage: Boolean(x.byUsage),
         day: x.day,
         start_month: x.startMonth,
         end_month: x.endMonth || null,
@@ -126,6 +133,8 @@
         payer: r.payer,
         categoryId: r.category_id,
         split: r.split,
+        shareA: r.share_a,
+        byUsage: r.by_usage,
         day: r.day,
         startMonth: r.start_month,
         endMonth: r.end_month,
@@ -210,7 +219,7 @@
       if (savedMode === 'local') {
         this.mode = 'local';
         this.state = readJSON(LOCAL_KEY);
-        if (this.state && !this.state.recurringTransfers) this.state.recurringTransfers = [];
+        if (this.state) this.state = { recurringTransfers: [], carUsage: {}, ...this.state };
         return this.state ? 'ready' : 'welcome';
       }
       if (!this.cloudConfigured()) return 'welcome';
@@ -278,7 +287,7 @@
 
       const cache = readJSON(CACHE_KEY);
       if (cache && cache.householdId === this.householdId) {
-        this.state = { recurringTransfers: [], ...cache.state };
+        this.state = { recurringTransfers: [], carUsage: {}, ...cache.state };
       }
       await this.fetchAll();
       this.subscribe();
@@ -307,7 +316,7 @@
     async fetchAll() {
       const hid = this.householdId;
       const q = (table) => this.client.from(table).select('*').eq('household_id', hid);
-      const [house, members, cats, exps, recs, trs, rtrs] = await Promise.all([
+      const [house, members, cats, exps, recs, trs, rtrs, usage] = await Promise.all([
         this.client.from('budg_households').select('*').eq('id', hid).single(),
         this.client.from('budg_members').select('person').eq('household_id', hid),
         q('budg_categories').order('position'),
@@ -315,8 +324,9 @@
         q('budg_recurring'),
         q('budg_transfers'),
         q('budg_recurring_transfers'),
+        q('budg_car_usage'),
       ]);
-      for (const res of [house, members, cats, exps, recs, trs, rtrs]) if (res.error) throw res.error;
+      for (const res of [house, members, cats, exps, recs, trs, rtrs, usage]) if (res.error) throw res.error;
 
       const h = house.data;
       this.inviteCode = h.invite_code;
@@ -332,6 +342,7 @@
         recurring: recs.data.map(TABLES.recurring.fromRow),
         transfers: trs.data.map(TABLES.transfers.fromRow),
         recurringTransfers: rtrs.data.map(TABLES.recurringTransfers.fromRow),
+        carUsage: Object.fromEntries(usage.data.map((u) => [u.month, u.split])),
       };
       this.emit();
     },
@@ -354,6 +365,11 @@
           refresh
         );
       }
+      channel = channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'budg_car_usage', filter: `household_id=eq.${hid}` },
+        refresh
+      );
       channel = channel.on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'budg_households', filter: `id=eq.${hid}` },
@@ -413,6 +429,27 @@
       }
     },
 
+    // Usage de la voiture d'un mois (null = revenir à la valeur héritée).
+    async setCarUsage(month, split) {
+      const usage = this.state.carUsage;
+      const previous = usage[month];
+      if (split == null) delete usage[month];
+      else usage[month] = split;
+      this.emit();
+      if (this.mode !== 'cloud') return;
+      const table = this.client.from('budg_car_usage');
+      const { error } =
+        split == null
+          ? await table.delete().eq('household_id', this.householdId).eq('month', month)
+          : await table.upsert({ household_id: this.householdId, month, split });
+      if (error) {
+        if (previous == null) delete usage[month];
+        else usage[month] = previous;
+        this.emit();
+        throw error;
+      }
+    },
+
     async updateSettings({ nameA, nameB, defaultSplit }) {
       this.state.people[0].name = nameA;
       this.state.people[1].name = nameB;
@@ -435,7 +472,7 @@
         throw new Error('Fichier de sauvegarde invalide');
       }
       if (this.mode === 'local') {
-        this.state = { recurringTransfers: [], ...data };
+        this.state = { recurringTransfers: [], carUsage: {}, ...data };
         this.emit();
         return;
       }
@@ -444,6 +481,11 @@
         const rows = (data[kind] || []).map((x) => ({ ...TABLES[kind].toRow(x), household_id: hid }));
         if (!rows.length) continue;
         const { error } = await this.client.from(TABLES[kind].table).upsert(rows);
+        if (error) throw error;
+      }
+      const usageRows = Object.entries(data.carUsage || {}).map(([month, split]) => ({ household_id: hid, month, split }));
+      if (usageRows.length) {
+        const { error } = await this.client.from('budg_car_usage').upsert(usageRows);
         if (error) throw error;
       }
       await this.fetchAll();
