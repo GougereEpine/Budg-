@@ -27,6 +27,7 @@ create table public.budg_categories (
   name text not null,
   icon text not null default '📦',
   budget int not null default 0 check (budget >= 0),
+  period text not null default 'month' check (period in ('month', 'year')), -- budget par mois ou par an
   position int not null default 0
 );
 

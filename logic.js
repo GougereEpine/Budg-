@@ -290,7 +290,37 @@
       return fixed + Math.round(variable / progress);
     };
 
+    // Budgets annuels (vacances…) : on suit l'année civile du mois affiché.
+    const yearMonths = monthsRange(`${month.slice(0, 4)}-01`, month);
+    const yearSummaries = yearMonths.map((m) => (m === month ? summary : monthSummary(state, m)));
+    const monthIndex = yearMonths.length; // 1 = janvier
+
     const categories = summary.categories.map((c) => {
+      const lastMonth = prevSummaries[0].categories.find((x) => x.id === c.id)?.spent || 0;
+      if (c.period === 'year' && c.budget > 0) {
+        const ytd = yearSummaries.reduce((sum, ys) => sum + (ys.categories.find((x) => x.id === c.id)?.spent || 0), 0);
+        // Cagnotte : 1/12e du budget s'ajoute chaque mois, les dépenses s'en déduisent.
+        const allowance = Math.round((c.budget * monthIndex) / 12);
+        const pct = Math.round((ytd / c.budget) * 100);
+        const avgs = withData.map((ps) => ps.categories.find((x) => x.id === c.id)?.spent || 0);
+        const average = avgs.length ? Math.round(avgs.reduce((x, y) => x + y, 0) / avgs.length) : null;
+        return {
+          ...c,
+          annual: true,
+          fixed: 0,
+          variable: c.spent,
+          ytd,
+          allowance,
+          available: allowance - ytd,
+          pct,
+          projected: c.spent,
+          projectedPct: null,
+          average,
+          lastMonth,
+          vsAverage: average ? Math.round(((c.spent - average) / average) * 100) : null,
+          level: ytd > c.budget ? 'over' : pct >= 90 ? 'warn' : 'ok',
+        };
+      }
       let fixed = 0;
       for (const e of summary.expenses) {
         if (e.categoryId === c.id && e.recurringId) fixed += e.amount;
@@ -315,6 +345,7 @@
         projected,
         projectedPct,
         average,
+        lastMonth,
         vsAverage: average ? Math.round(((c.spent - average) / average) * 100) : null,
         level,
       };
@@ -322,6 +353,11 @@
 
     const alerts = [];
     for (const c of categories) {
+      if (c.annual) {
+        if (c.level === 'over') alerts.push({ level: 'over', annual: true, categoryId: c.id, pct: c.pct, excess: c.ytd - c.budget });
+        else if (c.level === 'warn') alerts.push({ level: 'warn', annual: true, categoryId: c.id, pct: c.pct });
+        continue;
+      }
       if (c.level === 'over') {
         alerts.push({
           level: 'over',
@@ -346,8 +382,10 @@
     const order = { over: 0, warn: 1, trend: 2 };
     alerts.sort((x, y) => order[x.level] - order[y.level] || (y.pct || 0) - (x.pct || 0));
 
-    const budgeted = categories.filter((c) => c.budget > 0);
+    // Le récapitulatif « Budgets » du mois ne compte que les budgets mensuels.
+    const budgeted = categories.filter((c) => c.budget > 0 && !c.annual);
     const budgetSpent = budgeted.reduce((s, c) => s + c.spent, 0);
+    const budgetTotal = budgeted.reduce((s, c) => s + c.budget, 0);
     const fixedTotal = categories.reduce((s, c) => s + c.fixed, 0);
     const projectedTotal = project(fixedTotal, summary.total - fixedTotal);
     const prevAverage = withData.length
@@ -360,7 +398,8 @@
       categories,
       alerts,
       budgetSpent,
-      budgetPct: summary.budgetTotal > 0 ? Math.round((budgetSpent / summary.budgetTotal) * 100) : null,
+      budgetTotal,
+      budgetPct: budgetTotal > 0 ? Math.round((budgetSpent / budgetTotal) * 100) : null,
       projectedTotal,
       prevAverage,
       vsAverage: prevAverage ? Math.round(((summary.total - prevAverage) / prevAverage) * 100) : null,

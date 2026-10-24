@@ -82,8 +82,8 @@
   const TABLES = {
     categories: {
       table: 'budg_categories',
-      toRow: (c) => ({ id: c.id, name: c.name, icon: c.icon, budget: c.budget, position: c.position }),
-      fromRow: (r) => ({ id: r.id, name: r.name, icon: r.icon, budget: r.budget, position: r.position }),
+      toRow: (c) => ({ id: c.id, name: c.name, icon: c.icon, budget: c.budget, period: c.period || 'month', position: c.position }),
+      fromRow: (r) => ({ id: r.id, name: r.name, icon: r.icon, budget: r.budget, period: r.period, position: r.position }),
     },
     expenses: {
       table: 'budg_expenses',

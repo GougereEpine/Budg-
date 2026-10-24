@@ -686,15 +686,20 @@
     openModal(
       `${cat.icon} ${cat.name}`,
       `
-      <label class="field"><span>Budget mensuel (0 = pas de budget)</span>
+      <div class="seg" style="margin-bottom:12px">
+        <label><input type="radio" name="period" value="month" ${cat.period === 'year' ? '' : 'checked'}><span>Par mois</span></label>
+        <label><input type="radio" name="period" value="year" ${cat.period === 'year' ? 'checked' : ''}><span>Par an</span></label>
+      </div>
+      <label class="field"><span>Budget (0 = pas de budget)</span>
         <input class="big" name="amount" inputmode="decimal" placeholder="0 €" value="${amountValue(cat.budget)}" autocomplete="off">
-      </label>`,
+      </label>
+      <p class="hint">« Par an » pour les dépenses irrégulières (vacances, cadeaux…) : 1/12e s'ajoute à une cagnotte chaque mois, et l'alerte ne se déclenche que si le budget de l'année est dépassé.</p>`,
       {
         onSubmit: async (form) => {
           const v = form.amount.value.trim();
           const budget = v === '' ? 0 : L.parseAmount(v);
           if (!Number.isFinite(budget)) return fail(form, 'Montant invalide');
-          await S.save('categories', { ...cat, budget });
+          await S.save('categories', { ...cat, budget, period: form.period.value });
           toast('Budget mis à jour');
         },
       }
@@ -939,6 +944,15 @@
   function alertHtml(a) {
     const c = category(a.categoryId);
     const label = `${esc(c.icon)} ${esc(c.name)}`;
+    if (a.annual) {
+      return a.level === 'over'
+        ? `<div class="alert over"><span class="ico">🚨</span><div>
+            <strong>${label} : ${a.pct} % du budget annuel</strong>
+            Hors budget de <b>${euro(a.excess)}</b> (budget ${euro(c.budget)} par an)</div></div>`
+        : `<div class="alert warn"><span class="ico">⚠️</span><div>
+            <strong>${label} : ${a.pct} % du budget annuel utilisé</strong>
+            Il reste ${euro(Math.max(0, c.budget - Math.round((a.pct * c.budget) / 100)))} pour le reste de l'année</div></div>`;
+    }
     if (a.level === 'over') {
       return `<div class="alert over"><span class="ico">🚨</span><div>
         <strong>${label} : ${a.pct} % du budget</strong>
@@ -1418,10 +1432,47 @@
     const isCurrent = ui.month === currentMonth();
     const isPast = ui.month < currentMonth();
 
-    const budgeted = an.categories.filter((c) => c.budget > 0).sort((x, y) => y.pct - x.pct);
+    const budgeted = an.categories.filter((c) => c.budget > 0 && !c.annual).sort((x, y) => y.pct - x.pct);
+    const annual = an.categories.filter((c) => c.annual);
     const unbudgeted = an.categories.filter((c) => c.budget === 0 && c.spent > 0).sort((x, y) => y.spent - x.spent);
 
+    // Comparaison avec le mois précédent et la moyenne mensuelle.
+    const compare = (c) => {
+      const parts = [];
+      if (c.lastMonth || c.spent) {
+        const d = c.spent - c.lastMonth;
+        const arrow = d > 0 ? '<span class="up">▲</span>' : d < 0 ? '<span class="down">▼</span>' : '';
+        parts.push(`mois dernier ${euro(c.lastMonth)} ${arrow}`);
+      }
+      if (c.average) {
+        const vs = c.spent && c.vsAverage != null ? ` (<span class="${c.vsAverage > 0 ? 'up' : 'down'}">${c.vsAverage > 0 ? '+' : ''}${c.vsAverage} %</span>)` : '';
+        parts.push(`moyenne ${euro(c.average)}/mois${vs}`);
+      }
+      return parts.length ? `<div class="small muted">${parts.join(' · ')}</div>` : '';
+    };
+
+    // Budget annuel (vacances…) : suivi depuis janvier et cagnotte disponible.
+    const annualRow = (c) => {
+      const pct = Math.min(100, (c.ytd / c.budget) * 100);
+      const mark = Math.min(100, (c.allowance / c.budget) * 100);
+      const cagnotte =
+        c.available >= 0
+          ? `cagnotte disponible <b>${euro(c.available)}</b>`
+          : `<b style="color:var(--warn)">${euro(-c.available)} d'avance sur la cagnotte</b>`;
+      return `
+        <div class="budget-row level-${c.level}" data-category="${c.id}">
+          <div class="budget-head">
+            <span class="name">${esc(c.icon)} ${esc(c.name)}</span>
+            <span class="num">${euro(c.ytd)} <span class="muted small">/ ${euro(c.budget)}/an</span> <span class="pill ${pctClass(c.level)}">${c.pct} %</span></span>
+          </div>
+          <div class="bar"><div class="fill" style="width:${pct}%"></div><div class="mark" style="left:${mark}%" title="Cagnotte accumulée"></div></div>
+          <div class="small muted">Depuis janvier · ce mois ${euro(c.spent)} · ${cagnotte}</div>
+          <div class="small muted">${c.ytd > c.budget ? `<b style="color:var(--over)">${euro(c.ytd - c.budget)} hors budget annuel</b>` : `reste ${euro(c.budget - c.ytd)} pour l'année`}</div>
+        </div>`;
+    };
+
     const row = (c) => {
+      if (c.annual) return annualRow(c);
       const pct = c.budget ? Math.min(100, (c.spent / c.budget) * 100) : 0;
       const proj = c.budget && isCurrent ? Math.min(100, (c.projected / c.budget) * 100) : 0;
       const pill = c.budget
@@ -1436,10 +1487,6 @@
         detail = `reste ${euro(c.budget - c.spent)}`;
         if (isCurrent && c.projected > c.budget) detail += ` · projection ${euro(c.projected)}`;
       }
-      const vs =
-        c.vsAverage != null && c.spent > 0
-          ? ` · <span class="${c.vsAverage > 0 ? 'up' : 'down'}">${c.vsAverage > 0 ? '+' : ''}${c.vsAverage} % vs moy.</span>`
-          : '';
       return `
         <div class="budget-row level-${c.level}" data-category="${c.id}">
           <div class="budget-head">
@@ -1447,7 +1494,8 @@
             <span class="num">${euro(c.spent)}${c.budget ? ` <span class="muted small">/ ${euro(c.budget)}</span>` : ''} ${pill}</span>
           </div>
           ${c.budget ? `<div class="bar">${proj > pct ? `<div class="proj" style="width:${proj}%"></div>` : ''}<div class="fill" style="width:${pct}%"></div></div>` : ''}
-          <div class="small muted">${detail}${vs}</div>
+          <div class="small muted">${detail}</div>
+          ${compare(c)}
         </div>`;
     };
 
@@ -1503,6 +1551,7 @@
       <div class="card" style="padding-top:4px;padding-bottom:4px">
         ${budgeted.length ? budgeted.map(row).join('') : '<div class="empty">Aucun budget défini.<br>Touchez ✏️ pour en créer (ex. Courses 400 €).</div>'}
       </div>
+      ${annual.length ? `<h2>Budgets annuels</h2><div class="card" style="padding-top:4px;padding-bottom:4px">${annual.map(row).join('')}</div>` : ''}
       ${unbudgeted.length ? `<h2>Dépenses sans budget</h2><div class="card" style="padding-top:4px;padding-bottom:4px">${unbudgeted.map(row).join('')}</div>` : ''}
 
       <h2>Évolution</h2>
@@ -1567,15 +1616,19 @@
       }
 
       <div class="card" id="categories">
-        <h2 style="margin-top:0">🗂️ Catégories & budgets mensuels</h2>
-        <p class="hint" style="margin-top:0">Laissez le budget vide pour une catégorie sans enveloppe.</p>
+        <h2 style="margin-top:0">🗂️ Catégories & budgets</h2>
+        <p class="hint" style="margin-top:0">Laissez le budget vide pour une catégorie sans enveloppe. « /an » pour les vacances, les cadeaux… : suivi sur l'année avec une cagnotte.</p>
         ${cats
           .map(
             (c) => `
           <div class="cat-edit" data-cat="${c.id}">
             <button type="button" class="icon-pick" data-pick-icon aria-label="Changer l'icône">${esc(c.icon)}</button>
             <input name="name" value="${esc(c.name)}" maxlength="30" aria-label="Nom">
-            <input name="budget" inputmode="decimal" value="${amountValue(c.budget)}" placeholder="— €" aria-label="Budget mensuel">
+            <input name="budget" inputmode="decimal" value="${amountValue(c.budget)}" placeholder="— €" aria-label="Budget">
+            <select name="period" aria-label="Période du budget">
+              <option value="month" ${c.period === 'year' ? '' : 'selected'}>/mois</option>
+              <option value="year" ${c.period === 'year' ? 'selected' : ''}>/an</option>
+            </select>
             <button type="button" data-del-cat aria-label="Supprimer">🗑️</button>
           </div>`
           )
@@ -1624,6 +1677,10 @@
 
     view.querySelectorAll('[data-cat]').forEach((rowEl) => {
       const id = rowEl.dataset.cat;
+      rowEl.querySelector('[name=period]').onchange = (ev) => {
+        const c = state.categories.find((x) => x.id === id);
+        if (c) run(S.save('categories', { ...c, period: ev.target.value }), 'Enregistré');
+      };
       rowEl.querySelectorAll('input').forEach((input) => {
         input.onchange = () => {
           const c = state.categories.find((x) => x.id === id);

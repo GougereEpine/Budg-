@@ -870,7 +870,7 @@ dialog::backdrop {
 
 .cat-edit {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) 96px 36px;
+  grid-template-columns: 48px minmax(0, 1fr) 76px 70px 30px;
   gap: 6px;
   align-items: center;
   margin-bottom: 6px;
@@ -1021,4 +1021,20 @@ details.extras > summary {
   cursor: pointer;
   color: var(--accent);
   font-weight: 600;
+}
+
+.cat-edit select {
+  padding: 9px 4px;
+  font-size: 0.85rem;
+}
+
+/* Repère de la cagnotte accumulée sur la barre d'un budget annuel. */
+.bar .mark {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text);
+  opacity: 0.55;
 }

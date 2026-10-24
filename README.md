@@ -18,7 +18,11 @@ suit les **budgets du mois** et prévient quand ça dérape.
 - **Remboursements automatiques** : un virement permanent saisi une fois, à montant fixe ou
   égal à la part des charges fixes de l'autre (recalculée chaque mois).
 - **Solde du couple** : « Léa doit 468,25 € à Max », avec un bouton *Régler* qui enregistre le remboursement.
-- **Budgets mensuels** par catégorie (Courses 400 €, Restaurants 100 €, Vacances 150 €…).
+- **Budgets** par catégorie, par mois (Courses 400 €, Restaurants 100 €…) ou **par an** pour les
+  dépenses irrégulières (Vacances 1 800 €/an) : suivi depuis janvier et cagnotte qui grossit de 1/12e
+  chaque mois ; comparaison avec le mois dernier et la moyenne mensuelle.
+- **Notifications** : chacun est prévenu quand l'autre ajoute une dépense ou un remboursement
+  (Web Push via la fonction Supabase `budg-notify`).
 - **Analyse** :
   - alertes « 🚨 Courses : 140 % du budget, hors budget de 160,50 € » ;
   - projection de fin de mois au rythme actuel (« à ce rythme, 110 % du budget resto ») ;

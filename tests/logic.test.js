@@ -301,3 +301,36 @@ test('articles pour une seule personne (shampoing, dessert)', () => {
   assert.equal(bal.debtor, 'a');
   assert.equal(bal.amount, 1210);
 });
+
+test('budget annuel (vacances) : cagnotte et pas d\'alerte le mois du départ', () => {
+  const s = baseState({
+    categories: [
+      { id: 'vac', name: 'Vacances', icon: '✈️', budget: 180000, period: 'year', position: 0 },
+      { id: 'courses', name: 'Courses', icon: '🛒', budget: 40000, position: 1 },
+    ],
+    expenses: [
+      { id: '1', date: '2026-03-10', label: 'Week-end', amount: 30000, payer: 'a', categoryId: 'vac', split: 50 },
+      { id: '2', date: '2026-08-02', label: 'Grèce', amount: 120000, payer: 'b', categoryId: 'vac', split: 50 },
+      { id: '3', date: '2026-07-05', label: 'Courses', amount: 32000, payer: 'a', categoryId: 'courses', split: 50 },
+      { id: '4', date: '2026-08-05', label: 'Courses', amount: 38000, payer: 'a', categoryId: 'courses', split: 50 },
+    ],
+  });
+  const an = L.analyzeMonth(s, '2026-08', '2026-08-20');
+  const vac = an.categories.find((c) => c.id === 'vac');
+  assert.equal(vac.annual, true);
+  assert.equal(vac.spent, 120000); // ce mois-ci
+  assert.equal(vac.ytd, 150000); // depuis janvier
+  assert.equal(vac.allowance, 120000); // 8/12 de 1 800 €
+  assert.equal(vac.available, -30000); // cagnotte dépassée de 300 €
+  assert.equal(vac.pct, 83);
+  assert.equal(vac.level, 'ok'); // 1 500 / 1 800 : pas d'alerte malgré 1 200 € en août
+  // Le récapitulatif mensuel des budgets ignore le budget annuel.
+  assert.equal(an.budgetTotal, 40000);
+  // Comparaison : mois dernier.
+  assert.equal(an.categories.find((c) => c.id === 'courses').lastMonth, 32000);
+
+  s.expenses.push({ id: '5', date: '2026-08-15', label: 'Location', amount: 40000, payer: 'a', categoryId: 'vac', split: 50 });
+  const an2 = L.analyzeMonth(s, '2026-08', '2026-08-20');
+  assert.equal(an2.categories.find((c) => c.id === 'vac').level, 'over');
+  assert.deepEqual(an2.alerts[0], { level: 'over', annual: true, categoryId: 'vac', pct: 106, excess: 10000 });
+});
