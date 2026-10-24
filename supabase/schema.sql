@@ -70,7 +70,8 @@ create table public.budg_transfers (
   from_person text not null check (from_person in ('a', 'b')),
   to_person text not null check (to_person in ('a', 'b') and to_person <> from_person),
   amount int not null check (amount > 0),
-  note text not null default ''
+  note text not null default '',
+  created_by uuid default auth.uid() references auth.users (id) on delete set null
 );
 
 -- Remboursements automatiques mensuels : montant fixe, ou `auto` = la part
@@ -228,3 +229,67 @@ alter publication supabase_realtime add table
   public.budg_transfers,
   public.budg_recurring_transfers,
   public.budg_car_usage;
+
+-- ---------- Notifications push ----------
+-- La fonction Edge « budg-notify » (supabase/functions/budg-notify) envoie les
+-- notifications ; elle est appelée par un déclencheur à chaque nouvelle dépense
+-- ou nouveau remboursement.
+
+create extension if not exists pg_net with schema extensions;
+create index on public.budg_transfers (created_by);
+
+-- Abonnements Web Push : un par appareil.
+create table public.budg_push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references public.budg_households (id) on delete cascade,
+  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now()
+);
+create index on public.budg_push_subscriptions (household_id);
+create index on public.budg_push_subscriptions (user_id);
+
+alter table public.budg_push_subscriptions enable row level security;
+create policy "ses propres appareils" on public.budg_push_subscriptions
+  for all to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()) and budg_private.budg_is_member(household_id));
+
+-- Réglages internes du serveur (clés VAPID, secret du webhook) : RLS sans
+-- aucune règle, donc illisible depuis l'API ; seule la fonction (service role) y accède.
+create table public.budg_server_config (
+  key text primary key,
+  value text not null
+);
+alter table public.budg_server_config enable row level security;
+revoke all on public.budg_server_config from anon, authenticated;
+insert into public.budg_server_config (key, value)
+values ('webhook_secret', encode(extensions.gen_random_bytes(32), 'hex'));
+
+-- Remplacer l'URL par celle de votre projet.
+create function budg_private.notify_new_entry()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  secret text;
+begin
+  select value into secret from public.budg_server_config where key = 'webhook_secret';
+  perform net.http_post(
+    url := 'https://sxnndcxqdsaiqucxvijb.supabase.co/functions/v1/budg-notify',
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-budg-secret', secret),
+    body := jsonb_build_object('table', TG_TABLE_NAME, 'record', to_jsonb(new), 'actor', auth.uid())
+  );
+  return new;
+end;
+$$;
+revoke execute on function budg_private.notify_new_entry() from public, anon, authenticated;
+
+create trigger budg_notify_expense after insert on public.budg_expenses
+  for each row execute function budg_private.notify_new_entry();
+create trigger budg_notify_transfer after insert on public.budg_transfers
+  for each row execute function budg_private.notify_new_entry();

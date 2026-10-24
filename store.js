@@ -163,6 +163,7 @@
         to: r.to_person,
         amount: r.amount,
         note: r.note,
+        createdBy: r.created_by,
       }),
     },
     recurringTransfers: {
@@ -203,6 +204,8 @@
     client: null,
     channel: null,
     listeners: [],
+    partnerListeners: [],
+    knownIds: null, // ids déjà vus, pour repérer ce que l'autre vient d'ajouter
 
     cloudConfigured() {
       const c = window.BUDG_CONFIG || {};
@@ -211,6 +214,11 @@
 
     onChange(fn) {
       this.listeners.push(fn);
+    },
+
+    // Appelé avec (type, élément) quand l'autre ajoute une dépense ou un remboursement.
+    onPartnerActivity(fn) {
+      this.partnerListeners.push(fn);
     },
 
     emit() {
@@ -350,7 +358,83 @@
         recurringTransfers: rtrs.data.map(TABLES.recurringTransfers.fromRow),
         carUsage: Object.fromEntries(usage.data.map((u) => [u.month, u.split])),
       };
+      this.detectPartnerActivity();
       this.emit();
+    },
+
+    detectPartnerActivity() {
+      const items = [
+        ...this.state.expenses.map((x) => ['expense', x]),
+        ...this.state.transfers.map((x) => ['transfer', x]),
+      ];
+      const first = this.knownIds == null;
+      const known = this.knownIds || new Set();
+      for (const [type, x] of items) {
+        if (known.has(x.id)) continue;
+        known.add(x.id);
+        if (!first && x.createdBy && this.user && x.createdBy !== this.user.id) {
+          this.partnerListeners.forEach((fn) => fn(type, x));
+        }
+      }
+      this.knownIds = known;
+    },
+
+    // ---------- Notifications push ----------
+
+    isIOS() {
+      return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    },
+
+    isStandalone() {
+      return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    },
+
+    // 'unsupported' | 'ios-install' | 'denied' | 'on' | 'off'
+    async pushState() {
+      if (this.mode !== 'cloud') return 'unsupported';
+      if (this.isIOS() && !this.isStandalone()) return 'ios-install';
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return 'unsupported';
+      if (Notification.permission === 'denied') return 'denied';
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && (await reg.pushManager.getSubscription());
+      return sub && Notification.permission === 'granted' ? 'on' : 'off';
+    },
+
+    async enablePush() {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') throw new Error('Notifications refusées dans le navigateur');
+      const reg = await navigator.serviceWorker.ready;
+      const res = await fetch(`${window.BUDG_CONFIG.supabaseUrl}/functions/v1/budg-notify`);
+      const { publicKey } = await res.json();
+      const sub =
+        (await reg.pushManager.getSubscription()) ||
+        (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) }));
+      const json = sub.toJSON();
+      const { error } = await this.client.from('budg_push_subscriptions').upsert(
+        {
+          household_id: this.householdId,
+          user_id: this.user.id,
+          endpoint: json.endpoint,
+          p256dh: json.keys.p256dh,
+          auth: json.keys.auth,
+        },
+        { onConflict: 'endpoint' }
+      );
+      if (error) throw error;
+    },
+
+    async disablePush() {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg && (await reg.pushManager.getSubscription());
+      if (!sub) return;
+      await this.client.from('budg_push_subscriptions').delete().eq('endpoint', sub.endpoint);
+      await sub.unsubscribe();
+    },
+
+    async testPush() {
+      const { data, error } = await this.client.functions.invoke('budg-notify', { body: { test: true } });
+      if (error) throw error;
+      if (!data || !data.sent) throw new Error("Aucun appareil abonné n'a pu être joint");
     },
 
     // Toute modification faite par l'autre déclenche un rechargement (léger : un
@@ -497,6 +581,13 @@
       await this.fetchAll();
     },
   };
+
+  // Clé VAPID (base64 url) -> octets, format attendu par pushManager.subscribe.
+  function urlBase64ToUint8Array(base64) {
+    const padded = (base64 + '='.repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(padded);
+    return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+  }
 
   window.BudgStore = Store;
 })();

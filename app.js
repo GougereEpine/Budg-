@@ -1153,10 +1153,16 @@
         Aucun budget dépassé ce mois-ci.</div></div>`;
     }
 
+    // « Masquer les fixes » : on ne compte que les dépenses ponctuelles.
+    const spentKey = ui.hideFixed ? 'variable' : 'total';
+    const prev = an.history.slice(0, -1).filter((h) => h[spentKey] > 0);
+    const spentNow = an.history[an.history.length - 1][spentKey];
+    const avg = prev.length ? prev.reduce((sum, h) => sum + h[spentKey], 0) / prev.length : null;
+    const vsAvg = avg ? Math.round(((spentNow - avg) / avg) * 100) : null;
     const delta =
-      an.vsAverage == null
+      vsAvg == null
         ? '<span class="muted">Premier mois</span>'
-        : `<span class="${an.vsAverage > 0 ? 'up' : 'down'}">${an.vsAverage > 0 ? '+' : ''}${an.vsAverage} % vs moyenne</span>`;
+        : `<span class="${vsAvg > 0 ? 'up' : 'down'}">${vsAvg > 0 ? '+' : ''}${vsAvg} % vs moyenne</span>`;
 
     const recent = [...state.expenses]
       .sort((x, y) => (x.date === y.date ? 0 : x.date < y.date ? 1 : -1))
@@ -1171,9 +1177,11 @@
       ${balanceHtml}
       ${carReminder(cur)}
       ${alertsHtml ? `<h2>Alertes de ${monthLabel(cur, true)}</h2>${alertsHtml}` : ''}
-      <h2>Ce mois-ci</h2>
+      ${notifSuggestion()}
+      <div class="topbar"><h2>Ce mois-ci</h2>
+        <button class="chip ${ui.hideFixed ? 'active' : ''}" data-hide-fixed aria-pressed="${ui.hideFixed}">🔁 ${ui.hideFixed ? 'Fixes masquées' : 'Masquer les fixes'}</button></div>
       <div class="stats">
-        <div class="stat"><div class="label">Dépensé</div><div class="value num">${euro(an.total)}</div><div class="delta">${delta}</div></div>
+        <div class="stat"><div class="label">${ui.hideFixed ? 'Dépensé (hors fixes)' : 'Dépensé'}</div><div class="value num">${euro(spentNow)}</div><div class="delta">${delta}</div></div>
         <div class="stat"><div class="label">Budgets</div>
           <div class="value num">${an.budgetPct == null ? '—' : an.budgetPct + ' %'}</div>
           <div class="delta muted">${an.budgetTotal ? `${euro(an.budgetSpent)} / ${euro(an.budgetTotal)}` : 'aucun budget défini'}</div></div>
@@ -1575,6 +1583,12 @@
         <button type="button" class="btn block" data-add-cat style="margin-top:8px">＋ Ajouter une catégorie</button>
       </div>
 
+      ${cloud ? `<div class="card" id="notif-card">
+        <h2 style="margin-top:0">🔔 Notifications</h2>
+        <p class="small muted" data-notif-status style="margin:0 0 10px">…</p>
+        <div class="row" data-notif-actions></div>
+      </div>` : ''}
+
       <div class="card">
         <h2 style="margin-top:0">💾 Données</h2>
         <div class="row">
@@ -1707,6 +1721,8 @@
     const scroll = window.scrollY;
     TABS[ui.tab]();
     window.scrollTo(0, scroll);
+    fillNotifCard();
+    showNotifSuggestion();
   }
 
   function go(step) {
@@ -1772,6 +1788,102 @@
   });
 
   S.onChange(() => render());
+
+  // L'autre vient d'ajouter quelque chose pendant que l'appli est ouverte.
+  S.onPartnerActivity((type, x) => {
+    if (type === 'expense') {
+      toast(`${x.isIncome ? '💰' : '💸'} ${name(other(me()))} ${x.isIncome ? 'a reçu' : 'a ajouté'} ${x.label} — ${euro(x.amount)}`);
+    } else {
+      toast(`🤝 Remboursement de ${euro(x.amount)} : ${name(x.from)} → ${name(x.to)}`);
+    }
+  });
+
+  // ---------- Notifications push ----------
+
+  const NOTIF_TEXT = {
+    on: '✅ Activées sur cet appareil : vous serez prévenu(e) quand votre moitié ajoute une dépense ou un remboursement.',
+    off: 'Recevez une notification quand votre moitié ajoute une dépense ou un remboursement, même appli fermée.',
+    denied: "Les notifications sont bloquées pour ce site : autorisez-les dans les réglages du navigateur, puis revenez ici.",
+    'ios-install': "Sur iPhone, ajoutez d'abord Budg' à l'écran d'accueil (Partager → Sur l'écran d'accueil), puis ouvrez-le depuis l'icône pour activer les notifications.",
+    unsupported: "Ce navigateur ne gère pas les notifications push.",
+  };
+
+  async function fillNotifCard() {
+    const card = document.getElementById('notif-card');
+    if (!card) return;
+    const state = await S.pushState().catch(() => 'unsupported');
+    card.querySelector('[data-notif-status]').textContent = NOTIF_TEXT[state];
+    const actions = card.querySelector('[data-notif-actions]');
+    actions.innerHTML =
+      state === 'off'
+        ? '<button class="btn primary" data-notif="on">🔔 Activer sur cet appareil</button>'
+        : state === 'on'
+          ? '<button class="btn" data-notif="test">Envoyer un test</button><button class="btn danger" data-notif="off">Désactiver</button>'
+          : '';
+  }
+
+  function notifSuggestion() {
+    if (S.mode !== 'cloud' || readPref('budg-notif-hint') === 'hidden') return '';
+    return `<div class="alert trend" id="notif-hint" hidden><span class="ico">🔔</span><div>
+      <strong>Être prévenu(e) des dépenses de ${esc(name(other(me())))}</strong>
+      <span data-hint-text>Une notification à chaque nouvelle dépense, même appli fermée.</span>
+      <div style="margin-top:8px;display:flex;gap:8px"><button class="btn primary" data-notif="on">Activer</button><button class="btn" data-notif="dismiss">Plus tard</button></div>
+    </div></div>`;
+  }
+
+  async function showNotifSuggestion() {
+    const hint = document.getElementById('notif-hint');
+    if (!hint) return;
+    const state = await S.pushState().catch(() => 'unsupported');
+    if (state === 'off') hint.hidden = false;
+    else if (state === 'ios-install') {
+      hint.querySelector('[data-hint-text]').textContent = NOTIF_TEXT['ios-install'];
+      hint.querySelector('[data-notif="on"]').remove();
+      hint.hidden = false;
+    }
+  }
+
+  document.addEventListener('click', async (ev) => {
+    const b = ev.target.closest('[data-notif],[data-hide-fixed]');
+    if (!b || !view.contains(b)) return;
+    if (b.dataset.hideFixed !== undefined && !b.onclick) {
+      ui.hideFixed = !ui.hideFixed;
+      writePref('budg-hide-fixed', ui.hideFixed ? '1' : '0');
+      render();
+      return;
+    }
+    const action = b.dataset.notif;
+    if (!action) return;
+    if (action === 'dismiss') {
+      writePref('budg-notif-hint', 'hidden');
+      render();
+      return;
+    }
+    b.disabled = true;
+    try {
+      if (action === 'on') {
+        await S.enablePush();
+        toast('🔔 Notifications activées');
+        await S.testPush().catch(() => {});
+      } else if (action === 'off') {
+        await S.disablePush();
+        toast('Notifications désactivées sur cet appareil');
+      } else if (action === 'test') {
+        await S.testPush();
+        toast('Notification de test envoyée');
+      }
+    } catch (e) {
+      console.error(e);
+      toast('⚠️ ' + errorMessage(e));
+    } finally {
+      b.disabled = false;
+      render();
+    }
+  });
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('service worker', e));
+  }
 
   async function boot() {
     go('loading');
