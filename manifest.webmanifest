@@ -1,0 +1,12 @@
+{
+  "name": "Budg' — budget de couple",
+  "short_name": "Budg'",
+  "description": "Dépenses, charges fixes et budgets du couple : qui doit combien à qui.",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fbf7f4",
+  "theme_color": "#e8536b",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "budg",
+  "private": true,
+  "description": "Budg' : budget de couple partagé (dépenses, charges fixes, budgets, qui doit combien à qui).",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "test": "node --test tests/logic.test.js"
+  }
+}
