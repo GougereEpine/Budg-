@@ -16,6 +16,7 @@
     tab: 'home',
     month: L.monthKey(L.todayISO()),
     filter: 'all',
+    openFixedGroups: new Set(), // catégories dépliées dans l'onglet Fixes
     hideFixed: readPref('budg-hide-fixed') === '1',
   };
 
@@ -1190,6 +1191,49 @@
     };
   }
 
+  // Charges fixes regroupées par catégorie : une ligne résumé (total, part de
+  // chacun) qui se déplie sur le détail. Les groupes ouverts restent ouverts
+  // quand la page se redessine (synchro avec l'autre téléphone…).
+  function fixedGroupsHtml(list, item, sharesFor) {
+    const groups = new Map();
+    for (const r of list) {
+      const key = r.categoryId || 'none';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r);
+    }
+    return [...groups.entries()]
+      .map(([key, rs]) => {
+        const total = rs.reduce((sum, r) => sum + r.amount, 0);
+        const shares = rs.reduce(
+          (acc, r) => {
+            const sh = sharesFor(r);
+            return { a: acc.a + sh.a, b: acc.b + sh.b };
+          },
+          { a: 0, b: 0 }
+        );
+        return { key, rs, total, shares, cat: category(key === 'none' ? null : key) };
+      })
+      .sort((x, y) => y.total - x.total)
+      .map(
+        (g) => `
+        <details class="group" data-group="${g.key}" ${ui.openFixedGroups.has(g.key) ? 'open' : ''}>
+          <summary class="item">
+            <div class="emoji">${esc(g.cat.icon)}</div>
+            <div class="body">
+              <div class="title">${esc(g.cat.name)} <span class="muted small">· ${g.rs.length}</span></div>
+              ${sharesLine(g.shares)}
+            </div>
+            <div class="right">
+              <div class="amt num">${euro(g.total)}<span class="small muted">/mois</span></div>
+              <span class="chev" aria-hidden="true">›</span>
+            </div>
+          </summary>
+          <div class="group-body">${g.rs.map(item).join('')}</div>
+        </details>`
+      )
+      .join('');
+  }
+
   function renderFixed() {
     const state = S.state;
     const cur = currentMonth();
@@ -1271,7 +1315,7 @@
         }
       </div>
       <div class="card list">
-        ${active.length ? active.map(item).join('') : `<div class="empty">Ajoutez le loyer, les assurances, les abonnements…<br><br><button class="btn primary" data-add-recurring>＋ Ajouter une charge fixe</button></div>`}
+        ${active.length ? fixedGroupsHtml(active, item, (r) => L.sharesOf(r.byUsage ? { ...r, split: L.carUsageFor(state, cur).split } : r)) : `<div class="empty">Ajoutez le loyer, les assurances, les abonnements…<br><br><button class="btn primary" data-add-recurring>＋ Ajouter une charge fixe</button></div>`}
       </div>
       ${inactive.length ? `<h2>À venir ou terminées</h2><div class="card list">${inactive.map(item).join('')}</div>` : ''}
       <div class="topbar"><h2>🔁 Remboursements automatiques</h2>
@@ -1280,6 +1324,12 @@
         ${rtList.length ? rtList.map(rtItem).join('') : `<div class="empty">Ex. : ${esc(name(debtor))} rembourse sa part des charges fixes chaque début de mois.<br><br><button class="btn" data-add-rt>＋ Ajouter un remboursement auto</button></div>`}
       </div>`;
 
+    view.querySelectorAll('details[data-group]').forEach((d) => {
+      d.ontoggle = () => {
+        if (d.open) ui.openFixedGroups.add(d.dataset.group);
+        else ui.openFixedGroups.delete(d.dataset.group);
+      };
+    });
     view.querySelectorAll('[data-add-recurring]').forEach((b) => (b.onclick = () => recurringForm(null)));
     view.querySelectorAll('[data-add-rt]').forEach((b) => (b.onclick = () => recurringTransferForm(null)));
   }

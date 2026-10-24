@@ -958,3 +958,45 @@ dialog::backdrop {
 .list-head {
   flex-wrap: wrap;
 }
+
+/* ---------- Groupes dépliables (charges fixes par catégorie) ---------- */
+details.group {
+  border-bottom: 1px solid var(--line);
+}
+
+details.group:last-child {
+  border-bottom: 0;
+}
+
+details.group > summary {
+  list-style: none;
+  border-bottom: 0;
+}
+
+details.group > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.group .chev {
+  display: inline-block;
+  color: var(--muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  transition: transform 0.15s;
+}
+
+details.group[open] .chev {
+  transform: rotate(90deg);
+}
+
+.group-body {
+  margin: 0 0 8px 20px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+}
+
+.group-body .item .emoji {
+  width: 32px;
+  height: 32px;
+  font-size: 1rem;
+}
