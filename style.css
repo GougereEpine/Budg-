@@ -728,10 +728,12 @@ input[type='range'] {
 
 #tabs button {
   flex: 1;
+  min-width: 0;
   border: 0;
   background: none;
   font: inherit;
-  font-size: 0.7rem;
+  font-size: 0.66rem;
+  white-space: nowrap;
   color: var(--muted);
   display: flex;
   flex-direction: column;

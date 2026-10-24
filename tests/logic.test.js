@@ -348,3 +348,14 @@ test('qui a financé, hors charges fixes', () => {
   assert.deepEqual(c.share, { a: 1690, b: 1690 });
   assert.equal(c.diffA, 3380 - 1000 - 1690);
 });
+
+test('la fonction de notification utilise la même copie de logic.js', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const root = path.join(__dirname, '..');
+  assert.equal(
+    fs.readFileSync(path.join(root, 'supabase/functions/budg-notify/logic.js'), 'utf8'),
+    fs.readFileSync(path.join(root, 'logic.js'), 'utf8'),
+    'Recopier logic.js dans supabase/functions/budg-notify/ puis redéployer la fonction'
+  );
+});

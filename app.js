@@ -19,6 +19,8 @@
     search: '',
     openFixedGroups: new Set(), // catégories dépliées dans l'onglet Fixes
     hideFixed: readPref('budg-hide-fixed') === '1',
+    // Accueil : charges fixes masquées par défaut (réglage séparé).
+    hideFixedHome: readPref('budg-hide-fixed-home') !== '0',
   };
 
   // Préférences propres à cet appareil (le stockage peut être indisponible).
@@ -1023,8 +1025,8 @@
   }
 
   // « Qui a payé » d'un mois, virements compris, comparé à la part de chacun.
-  function whoPaidHtml(month) {
-    const c = L.monthContributions(S.state, month, { variableOnly: ui.hideFixed });
+  function whoPaidHtml(month, hide = ui.hideFixed) {
+    const c = L.monthContributions(S.state, month, { variableOnly: hide });
     if (!c.paid.a && !c.paid.b && !c.given.a && !c.given.b) return '<div class="empty">Rien ce mois-ci.</div>';
     const pos = { a: Math.max(0, c.funded.a), b: Math.max(0, c.funded.b) };
     const transfers = ['a', 'b']
@@ -1036,7 +1038,7 @@
         ? '✅ Chacun a financé exactement sa part ce mois-ci.'
         : `${esc(name(c.diffA > 0 ? 'a' : 'b'))} a financé <b>${euro(Math.abs(c.diffA))}</b> de plus que sa part ce mois-ci.`;
     return `
-      <div class="small muted">Financé par chacun${ui.hideFixed ? ' — hors charges fixes' : ''}${transfers ? ' (virements compris)' : ''}</div>
+      <div class="small muted">Financé par chacun${hide ? ' — hors charges fixes' : ''}${transfers ? ' (virements compris)' : ''}</div>
       ${splitBar(pos, euro(c.funded.a), euro(c.funded.b))}
       <p class="small muted" style="margin:6px 0 0">Payé directement : ${esc(name('a'))} ${euro(c.paid.a)} · ${esc(name('b'))} ${euro(c.paid.b)}${transfers ? `<br>${transfers}` : ''}</p>
       <div class="small muted" style="margin-top:12px">Part de chacun</div>
@@ -1170,7 +1172,7 @@
     }
 
     // « Masquer les fixes » : on ne compte que les dépenses ponctuelles.
-    const spentKey = ui.hideFixed ? 'variable' : 'total';
+    const spentKey = ui.hideFixedHome ? 'variable' : 'total';
     const prev = an.history.slice(0, -1).filter((h) => h[spentKey] > 0);
     const spentNow = an.history[an.history.length - 1][spentKey];
     const avg = prev.length ? prev.reduce((sum, h) => sum + h[spentKey], 0) / prev.length : null;
@@ -1195,15 +1197,15 @@
       ${alertsHtml ? `<h2>Alertes de ${monthLabel(cur, true)}</h2>${alertsHtml}` : ''}
       ${notifSuggestion()}
       <div class="topbar"><h2>Ce mois-ci</h2>
-        <button class="chip ${ui.hideFixed ? 'active' : ''}" data-hide-fixed aria-pressed="${ui.hideFixed}">🔁 ${ui.hideFixed ? 'Fixes masquées' : 'Masquer les fixes'}</button></div>
+        <button class="chip ${ui.hideFixedHome ? 'active' : ''}" data-hide-fixed-home aria-pressed="${ui.hideFixedHome}">🔁 ${ui.hideFixedHome ? 'Fixes masquées' : 'Masquer les fixes'}</button></div>
       <div class="stats">
-        <div class="stat"><div class="label">${ui.hideFixed ? 'Dépensé (hors fixes)' : 'Dépensé'}</div><div class="value num">${euro(spentNow)}</div><div class="delta">${delta}</div></div>
+        <div class="stat"><div class="label">${ui.hideFixedHome ? 'Dépensé (hors fixes)' : 'Dépensé'}</div><div class="value num">${euro(spentNow)}</div><div class="delta">${delta}</div></div>
         <div class="stat"><div class="label">Budgets</div>
           <div class="value num">${an.budgetPct == null ? '—' : an.budgetPct + ' %'}</div>
           <div class="delta muted">${an.budgetTotal ? `${euro(an.budgetSpent)} / ${euro(an.budgetTotal)}` : 'aucun budget défini'}</div></div>
       </div>
       <div class="card">
-        ${whoPaidHtml(cur)}
+        ${whoPaidHtml(cur, ui.hideFixedHome)}
       </div>
       <h2>Dernières dépenses</h2>
       <div class="card list">
@@ -1716,7 +1718,7 @@
       ${cloud ? `<div class="card" id="notif-card">
         <h2 style="margin-top:0">🔔 Notifications</h2>
         <p class="small muted" data-notif-status style="margin:0 0 10px">…</p>
-        <div class="row" data-notif-actions></div>
+        <div class="row" data-notif-actions style="flex-wrap:wrap"></div>
       </div>` : ''}
 
       <div class="card">
@@ -2041,7 +2043,7 @@
       return `✅ Activées sur cet appareil : une notif dès que ${name(other(me()))} ajoute une dépense ou un remboursement.`;
     },
     get off() {
-      return `Une notif dès que ${name(other(me()))} ajoute une dépense ou un remboursement, même appli fermée.`;
+      return `Une notif dès que ${name(other(me()))} ajoute une dépense, un remboursement ou des articles à la liste, même appli fermée. Et un bilan le 1er du mois.`;
     },
     denied: "Les notifications sont bloquées pour ce site : autorisez-les dans les réglages du navigateur, puis revenez ici.",
     'ios-install': "Sur iPhone, ajoutez d'abord Budg' à l'écran d'accueil (Partager → Sur l'écran d'accueil), puis ouvrez-le depuis l'icône pour activer les notifications.",
@@ -2058,7 +2060,7 @@
       state === 'off'
         ? '<button class="btn primary" data-notif="on">🔔 Activer sur cet appareil</button>'
         : state === 'on'
-          ? '<button class="btn" data-notif="test">Envoyer un test</button><button class="btn danger" data-notif="off">Désactiver</button>'
+          ? '<button class="btn" data-notif="test">Envoyer un test</button><button class="btn" data-notif="monthly">📊 Bilan du mois dernier</button><button class="btn danger" data-notif="off">Désactiver</button>'
           : '';
   }
 
@@ -2084,8 +2086,14 @@
   }
 
   document.addEventListener('click', async (ev) => {
-    const b = ev.target.closest('[data-notif],[data-hide-fixed]');
+    const b = ev.target.closest('[data-notif],[data-hide-fixed],[data-hide-fixed-home]');
     if (!b || !view.contains(b)) return;
+    if (b.dataset.hideFixedHome !== undefined) {
+      ui.hideFixedHome = !ui.hideFixedHome;
+      writePref('budg-hide-fixed-home', ui.hideFixedHome ? '1' : '0');
+      render();
+      return;
+    }
     if (b.dataset.hideFixed !== undefined && !b.onclick) {
       ui.hideFixed = !ui.hideFixed;
       writePref('budg-hide-fixed', ui.hideFixed ? '1' : '0');
@@ -2111,6 +2119,9 @@
       } else if (action === 'test') {
         await S.testPush();
         toast('Notification de test envoyée');
+      } else if (action === 'monthly') {
+        await S.previewMonthly();
+        toast('Bilan envoyé sur vos appareils');
       }
     } catch (e) {
       console.error(e);

@@ -36,7 +36,7 @@
 
   // "12,50" / "12.5" / "1 200" -> centimes. Renvoie NaN si invalide.
   function parseAmount(input) {
-    const s = String(input).replace(/[\s €]/g, '').replace(',', '.');
+    const s = String(input).replace(/[\s\u00a0€]/g, '').replace(',', '.');
     if (!/^\d+(\.\d{0,2})?$/.test(s)) return NaN;
     return Math.round(parseFloat(s) * 100);
   }

@@ -603,6 +603,13 @@
       await sub.unsubscribe();
     },
 
+    // Bilan du mois dernier envoyé tout de suite sur ses propres appareils.
+    async previewMonthly() {
+      const { data, error } = await this.client.functions.invoke('budg-notify', { body: { preview: 'monthly' } });
+      if (error) throw error;
+      if (!data || !data.sent) throw new Error("Aucun appareil abonné n'a pu être joint");
+    },
+
     async testPush() {
       const { data, error } = await this.client.functions.invoke('budg-notify', { body: { test: true } });
       if (error) throw error;

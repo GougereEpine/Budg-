@@ -303,7 +303,8 @@ create table public.budg_shopping_items (
   done boolean not null default false,
   position double precision not null default 0,
   created_by uuid default auth.uid() references auth.users (id) on delete set null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  notified boolean not null default false -- déjà signalé à l'autre (notifications groupées)
 );
 create index on public.budg_shopping_items (household_id);
 create index on public.budg_shopping_items (created_by);
@@ -314,3 +315,53 @@ create policy "membres : tout" on public.budg_shopping_items
   using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
 
 alter publication supabase_realtime add table public.budg_shopping_items;
+
+-- ---------- Tâches planifiées (pg_cron) ----------
+create extension if not exists pg_cron;
+
+-- Appel de la fonction budg-notify avec le secret partagé.
+create function budg_private.call_notify(payload jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  secret text;
+begin
+  select value into secret from public.budg_server_config where key = 'webhook_secret';
+  perform net.http_post(
+    url := 'https://sxnndcxqdsaiqucxvijb.supabase.co/functions/v1/budg-notify',
+    headers := jsonb_build_object('Content-Type', 'application/json', 'x-budg-secret', secret),
+    body := payload
+  );
+end;
+$$;
+revoke execute on function budg_private.call_notify(jsonb) from public, anon, authenticated;
+
+-- Liste de courses : on ne prévient qu'une fois la série d'ajouts terminée
+-- (aucun nouvel article de la même personne depuis 3 minutes).
+create function budg_private.shopping_digest()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if exists (
+    select 1
+    from public.budg_shopping_items
+    where not notified
+    group by household_id, created_by
+    having max(created_at) < now() - interval '3 minutes'
+  ) then
+    perform budg_private.call_notify(jsonb_build_object('type', 'shopping'));
+  end if;
+end;
+$$;
+revoke execute on function budg_private.shopping_digest() from public, anon, authenticated;
+
+-- Bilan mensuel : le 1er du mois à 7 h UTC (8 h ou 9 h à Paris).
+select cron.schedule('budg-monthly-summary', '0 7 1 * *', $$select budg_private.call_notify('{"type":"monthly"}'::jsonb)$$);
+-- Liste de courses : vérification toutes les 5 minutes.
+select cron.schedule('budg-shopping-digest', '*/5 * * * *', $$select budg_private.shopping_digest()$$);
