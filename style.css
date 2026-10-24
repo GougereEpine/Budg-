@@ -1038,3 +1038,27 @@ details.extras > summary {
   background: var(--text);
   opacity: 0.55;
 }
+
+/* iPhone (Safari) : les champs date / mois ont une largeur minimale propre et une
+   hauteur différente, ce qui les faisait déborder sur le champ voisin. */
+input[type='date'],
+input[type='month'] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 46px;
+  line-height: 1.2;
+  text-align: left;
+}
+
+input[type='date']::-webkit-date-and-time-value,
+input[type='month']::-webkit-date-and-time-value {
+  text-align: left;
+  margin: 0;
+}
+
+label.field {
+  min-width: 0;
+}
