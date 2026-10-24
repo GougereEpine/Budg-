@@ -294,3 +294,23 @@ create trigger budg_notify_expense after insert on public.budg_expenses
   for each row execute function budg_private.notify_new_entry();
 create trigger budg_notify_transfer after insert on public.budg_transfers
   for each row execute function budg_private.notify_new_entry();
+
+-- ---------- Liste de courses partagée ----------
+create table public.budg_shopping_items (
+  id uuid primary key,
+  household_id uuid not null references public.budg_households (id) on delete cascade,
+  label text not null check (char_length(label) between 1 and 80),
+  done boolean not null default false,
+  position double precision not null default 0,
+  created_by uuid default auth.uid() references auth.users (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index on public.budg_shopping_items (household_id);
+create index on public.budg_shopping_items (created_by);
+
+alter table public.budg_shopping_items enable row level security;
+create policy "membres : tout" on public.budg_shopping_items
+  for all to authenticated
+  using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
+
+alter publication supabase_realtime add table public.budg_shopping_items;

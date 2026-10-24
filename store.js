@@ -58,6 +58,7 @@
       transfers: [],
       recurringTransfers: [],
       carUsage: {},
+      shopping: [],
     };
   }
 
@@ -166,6 +167,11 @@
         createdBy: r.created_by,
       }),
     },
+    shopping: {
+      table: 'budg_shopping_items',
+      toRow: (x) => ({ id: x.id, label: x.label, done: x.done, position: x.position }),
+      fromRow: (r) => ({ id: r.id, label: r.label, done: r.done, position: r.position, createdBy: r.created_by }),
+    },
     recurringTransfers: {
       table: 'budg_recurring_transfers',
       toRow: (x) => ({
@@ -233,7 +239,7 @@
       if (savedMode === 'local') {
         this.mode = 'local';
         this.state = readJSON(LOCAL_KEY);
-        if (this.state) this.state = { recurringTransfers: [], carUsage: {}, ...this.state };
+        if (this.state) this.state = { recurringTransfers: [], carUsage: {}, shopping: [], ...this.state };
         return this.state ? 'ready' : 'welcome';
       }
       if (!this.cloudConfigured()) return 'welcome';
@@ -301,7 +307,7 @@
 
       const cache = readJSON(CACHE_KEY);
       if (cache && cache.householdId === this.householdId) {
-        this.state = { recurringTransfers: [], carUsage: {}, ...cache.state };
+        this.state = { recurringTransfers: [], carUsage: {}, shopping: [], ...cache.state };
       }
       await this.fetchAll();
       this.subscribe();
@@ -330,7 +336,7 @@
     async fetchAll() {
       const hid = this.householdId;
       const q = (table) => this.client.from(table).select('*').eq('household_id', hid);
-      const [house, members, cats, exps, recs, trs, rtrs, usage] = await Promise.all([
+      const [house, members, cats, exps, recs, trs, rtrs, usage, shop] = await Promise.all([
         this.client.from('budg_households').select('*').eq('id', hid).single(),
         this.client.from('budg_members').select('person').eq('household_id', hid),
         q('budg_categories').order('position'),
@@ -339,8 +345,9 @@
         q('budg_transfers'),
         q('budg_recurring_transfers'),
         q('budg_car_usage'),
+        q('budg_shopping_items').order('position'),
       ]);
-      for (const res of [house, members, cats, exps, recs, trs, rtrs, usage]) if (res.error) throw res.error;
+      for (const res of [house, members, cats, exps, recs, trs, rtrs, usage, shop]) if (res.error) throw res.error;
 
       const h = house.data;
       this.inviteCode = h.invite_code;
@@ -357,6 +364,7 @@
         transfers: trs.data.map(TABLES.transfers.fromRow),
         recurringTransfers: rtrs.data.map(TABLES.recurringTransfers.fromRow),
         carUsage: Object.fromEntries(usage.data.map((u) => [u.month, u.split])),
+        shopping: shop.data.map(TABLES.shopping.fromRow),
       };
       this.detectPartnerActivity();
       this.emit();
@@ -562,12 +570,12 @@
         throw new Error('Fichier de sauvegarde invalide');
       }
       if (this.mode === 'local') {
-        this.state = { recurringTransfers: [], carUsage: {}, ...data };
+        this.state = { recurringTransfers: [], carUsage: {}, shopping: [], ...data };
         this.emit();
         return;
       }
       const hid = this.householdId;
-      for (const kind of ['categories', 'expenses', 'recurring', 'transfers', 'recurringTransfers']) {
+      for (const kind of ['categories', 'expenses', 'recurring', 'transfers', 'recurringTransfers', 'shopping']) {
         const rows = (data[kind] || []).map((x) => ({ ...TABLES[kind].toRow(x), household_id: hid }));
         if (!rows.length) continue;
         const { error } = await this.client.from(TABLES[kind].table).upsert(rows);

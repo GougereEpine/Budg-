@@ -1062,3 +1062,58 @@ input[type='month']::-webkit-date-and-time-value {
 label.field {
   min-width: 0;
 }
+
+/* ---------- Liste de courses ---------- */
+.shop-add {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.shop-add .btn {
+  flex: none;
+  width: 48px;
+  font-size: 1.3rem;
+  padding: 0;
+}
+
+.shop-item .check {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.shop-item.done .check {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
+.shop-item.done .title {
+  text-decoration: line-through;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.icon-btn.small-btn {
+  width: 32px;
+  height: 32px;
+  font-size: 0.85rem;
+  box-shadow: none;
+  background: var(--surface-2);
+}
+
+.search {
+  margin-bottom: 12px;
+}
+
+.search input {
+  border-radius: 99px;
+  padding-left: 16px;
+}

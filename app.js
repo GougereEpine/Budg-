@@ -16,6 +16,7 @@
     tab: 'home',
     month: L.monthKey(L.todayISO()),
     filter: 'all',
+    search: '',
     openFixedGroups: new Set(), // catégories dépliées dans l'onglet Fixes
     hideFixed: readPref('budg-hide-fixed') === '1',
   };
@@ -402,7 +403,7 @@
     const e = existing || {
       id: S.newId(),
       date: today(),
-      label: '',
+      label: preset.label || '',
       amount: 0,
       payer: me(),
       categoryId: preset.categoryId || (sortedCategories()[0] || {}).id || null,
@@ -494,6 +495,7 @@
             categoryId: form.categoryId.value || null,
           });
           toast(form.kind.value === 'income' ? 'Entrée d\'argent enregistrée' : existing ? 'Dépense modifiée' : 'Dépense ajoutée');
+          if (preset.onSaved) await preset.onSaved();
         },
         onDelete: existing ? () => S.remove('expenses', e.id) : null,
       }
@@ -1214,7 +1216,80 @@
     }
   }
 
+  // ---------- Recherche (tout l'historique) ----------
+
+  function searchBox() {
+    return `
+      <div class="search">
+        <input name="search" type="search" placeholder="🔍 Rechercher : Carrefour, EDF, 33,80…" value="${esc(ui.search)}" autocomplete="off" enterkeyhint="search">
+      </div>`;
+  }
+
+  let searchTimer = null;
+  function bindSearchBox() {
+    const input = view.querySelector('input[name=search]');
+    input.oninput = () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        ui.search = input.value;
+        render();
+      }, 150);
+    };
+  }
+
+  function normalize(text) {
+    return String(text).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }
+
+  function renderSearch() {
+    const state = S.state;
+    const q = normalize(ui.search.trim());
+    const cents = L.parseAmount(ui.search.trim());
+    const matches = (fields, amount) =>
+      fields.some((f) => f && normalize(f).includes(q)) || (Number.isFinite(cents) && cents > 0 && Math.abs(amount) === cents);
+
+    const upTo = currentMonth() > ui.month ? currentMonth() : ui.month;
+    let items = L.allExpenses(state, upTo)
+      .filter((e) => matches([e.label, category(e.categoryId).name, name(e.payer)], e.amount))
+      .map((e) => ({ kind: 'e', date: e.date, data: e }));
+    items = items.concat(
+      L.allTransfers(state, upTo)
+        .filter((t) => matches(['remboursement', t.note, name(t.from), name(t.to)], t.amount))
+        .map((t) => ({ kind: 't', date: t.date, data: t }))
+    );
+    items.sort((x, y) => (x.date === y.date ? 0 : x.date < y.date ? 1 : -1));
+    const shown = items.slice(0, 300);
+    const total = items.filter((it) => it.kind === 'e').reduce((sum, it) => sum + it.data.amount, 0);
+
+    let html = '';
+    let lastMonth = null;
+    for (const it of shown) {
+      const m = L.monthKey(it.date);
+      if (m !== lastMonth) {
+        if (lastMonth) html += '</div>';
+        const monthTotal = shown.filter((x) => x.kind === 'e' && L.monthKey(x.date) === m).reduce((sum, x) => sum + x.data.amount, 0);
+        html += `<div class="day-head">${esc(monthLabel(m))} · ${euro(monthTotal)}</div><div class="card list">`;
+        lastMonth = m;
+      }
+      html += it.kind === 'e' ? expenseItem(it.data) : transferItem(it.data);
+    }
+    if (lastMonth) html += '</div>';
+
+    view.innerHTML = `
+      <div class="topbar"><h1>Dépenses</h1>
+        <button class="icon-btn" data-search-clear aria-label="Fermer la recherche">✕</button></div>
+      ${searchBox()}
+      <p class="muted small" style="margin:4px 4px 0">${items.length} résultat(s) sur tout l'historique · total <b class="num">${euro(total)}</b>${items.length > shown.length ? ' · 300 premiers affichés' : ''}</p>
+      ${html || '<div class="card empty">Aucun résultat.</div>'}`;
+    bindSearchBox();
+    view.querySelector('[data-search-clear]').onclick = () => {
+      ui.search = '';
+      render();
+    };
+  }
+
   function renderExpenses() {
+    if (ui.search.trim()) return renderSearch();
     const state = S.state;
     const expenses = L.monthExpenses(state, ui.month);
     const transfers = L.allTransfers(state, ui.month).filter((t) => L.monthKey(t.date) === ui.month);
@@ -1265,6 +1340,7 @@
     view.innerHTML = `
       <div class="topbar"><h1>Dépenses</h1>
         <button class="icon-btn" data-add-transfer aria-label="Ajouter un remboursement">💸</button></div>
+      ${searchBox()}
       ${monthNav()}
       <div class="chips">
         ${chips.map(([v, l]) => `<button class="chip ${f === v ? 'active' : ''}" data-filter="${esc(v)}">${esc(l)}</button>`).join('')}
@@ -1275,6 +1351,7 @@
       </div>
       ${html || '<div class="card empty">Rien ce mois-ci.</div>'}`;
 
+    bindSearchBox();
     view.querySelector('[data-add-transfer]').onclick = () => transferForm(null);
     view.querySelector('[data-hide-fixed]').onclick = () => {
       ui.hideFixed = !ui.hideFixed;
@@ -1758,11 +1835,77 @@
     }
   }
 
+  // ---------- Liste de courses ----------
+
+  function renderShopping() {
+    const items = [...S.state.shopping].sort((x, y) => x.done - y.done || x.position - y.position);
+    const todo = items.filter((i) => !i.done);
+    const done = items.filter((i) => i.done);
+    const row = (i) => `
+      <div class="item shop-item ${i.done ? 'done' : ''}" data-shop="${i.id}">
+        <span class="check" aria-hidden="true">${i.done ? '✓' : ''}</span>
+        <div class="body"><div class="title">${esc(i.label)}</div></div>
+        <button class="icon-btn small-btn" data-shop-del="${i.id}" aria-label="Retirer ${esc(i.label)}">✕</button>
+      </div>`;
+    view.innerHTML = `
+      <div class="topbar"><h1>Liste de courses</h1></div>
+      <form class="shop-add" id="shop-add">
+        <input name="shopLabel" placeholder="Ajouter : lait, pain, shampoing…" maxlength="80" autocomplete="off" enterkeyhint="done">
+        <button class="btn primary" aria-label="Ajouter">＋</button>
+      </form>
+      <div class="card list">
+        ${todo.length ? todo.map(row).join('') : '<div class="empty">Rien à acheter 🎉<br>Ajoutez des articles, ils apparaissent aussi chez l\'autre.</div>'}
+      </div>
+      ${
+        done.length
+          ? `<div class="topbar"><h2>Dans le panier · ${done.length}</h2>
+               <button class="btn link" data-shop-clear>Vider</button></div>
+             <div class="card list">${done.map(row).join('')}</div>
+             <button class="btn primary block" data-shop-checkout>🧾 Passer en caisse</button>
+             <p class="hint" style="text-align:center;margin-top:8px">Crée la dépense « Courses » et retire les articles cochés.</p>`
+          : ''
+      }`;
+
+    const form = view.querySelector('#shop-add');
+    form.onsubmit = (ev) => {
+      ev.preventDefault();
+      const label = form.shopLabel.value.trim();
+      if (!label) return;
+      form.shopLabel.value = '';
+      const position = Math.max(0, ...S.state.shopping.map((i) => i.position)) + 1;
+      run(S.save('shopping', { id: S.newId(), label, done: false, position }));
+      form.shopLabel.focus();
+    };
+    view.querySelectorAll('[data-shop]').forEach((el) => {
+      el.onclick = (ev) => {
+        if (ev.target.closest('[data-shop-del]')) return;
+        const it = S.state.shopping.find((x) => x.id === el.dataset.shop);
+        if (it) run(S.save('shopping', { ...it, done: !it.done }));
+      };
+    });
+    view.querySelectorAll('[data-shop-del]').forEach((b) => {
+      b.onclick = () => run(S.remove('shopping', b.dataset.shopDel));
+    });
+    const clearDone = async () => {
+      for (const it of S.state.shopping.filter((x) => x.done)) await S.remove('shopping', it.id);
+    };
+    const clear = view.querySelector('[data-shop-clear]');
+    if (clear) clear.onclick = () => run(clearDone(), 'Articles retirés');
+    const checkout = view.querySelector('[data-shop-checkout]');
+    if (checkout) {
+      checkout.onclick = () => {
+        const courses = S.state.categories.find((c) => c.name === 'Courses');
+        expenseForm(null, { label: 'Courses', categoryId: courses && courses.id, onSaved: () => run(clearDone()) });
+      };
+    }
+  }
+
   // ---------- Routage ----------
 
   const TABS = {
     home: renderHome,
     expenses: renderExpenses,
+    shopping: renderShopping,
     fixed: renderFixed,
     budget: renderBudget,
     settings: renderSettings,
@@ -1775,9 +1918,25 @@
     if (ui.tab === 'settings' && focused && view.contains(focused) && focused.matches('input')) return;
     tabs.hidden = false;
     tabs.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === ui.tab));
+    // Une synchro ne doit pas faire perdre ce qu'on est en train de taper.
+    const keep = focused && view.contains(focused) && focused.name && focused.matches('input')
+      ? { name: focused.name, value: focused.value, start: focused.selectionStart, end: focused.selectionEnd }
+      : null;
     const scroll = window.scrollY;
     TABS[ui.tab]();
     window.scrollTo(0, scroll);
+    if (keep) {
+      const el = view.querySelector(`input[name="${keep.name}"]`);
+      if (el) {
+        el.value = keep.value;
+        el.focus();
+        try {
+          el.setSelectionRange(keep.start, keep.end);
+        } catch (e) {
+          /* champ sans sélection (nombre…) */
+        }
+      }
+    }
     fillNotifCard();
     showNotifSuggestion();
   }
