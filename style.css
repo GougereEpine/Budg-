@@ -627,13 +627,21 @@ input[type='range'] {
 }
 
 .seg label {
+  position: relative;
   flex: 1;
   text-align: center;
   cursor: pointer;
 }
 
+/* Bouton radio invisible : taille nulle, sinon il prend 100 % de la fenêtre et
+   la fait défiler en largeur. */
 .seg input {
   position: absolute;
+  inset: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
   opacity: 0;
   pointer-events: none;
 }
@@ -742,6 +750,7 @@ dialog {
   width: 100%;
   max-width: 560px;
   max-height: 92vh;
+  overflow-x: hidden;
   margin: auto auto 0;
   background: var(--bg);
   color: var(--text);

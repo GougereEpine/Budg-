@@ -149,7 +149,9 @@
         errEl.textContent = errorMessage(e);
       }
     };
-    modalForm.querySelector('[data-close]').onclick = () => modal.close();
+    modalDirty = false;
+    modalForm.oninput = modalForm.onchange = () => (modalDirty = true);
+    modalForm.querySelector('[data-close]').onclick = () => closeModalSafely();
     const del = modalForm.querySelector('[data-delete]');
     if (del) {
       del.onclick = async () => {
@@ -162,8 +164,26 @@
     if (onOpen) onOpen(modalForm);
   }
 
+  // Une saisie en cours n'est jamais perdue par un clic à côté ou la touche Échap :
+  // on ferme directement si rien n'a été modifié, sinon on demande confirmation.
+  let modalDirty = false;
+
+  function closeModalSafely() {
+    if (modalDirty && !confirm('Fermer sans enregistrer ? Votre saisie sera perdue.')) return;
+    modal.close();
+  }
+
+  // Le clic doit commencer ET finir sur le fond (sinon, sélectionner du texte dans
+  // un champ et relâcher la souris à côté fermait la fenêtre).
+  let pressedOnBackdrop = false;
+  modal.addEventListener('mousedown', (ev) => (pressedOnBackdrop = ev.target === modal));
   modal.addEventListener('click', (ev) => {
-    if (ev.target === modal) modal.close();
+    if (ev.target === modal && pressedOnBackdrop) closeModalSafely();
+    pressedOnBackdrop = false;
+  });
+  modal.addEventListener('cancel', (ev) => {
+    ev.preventDefault();
+    closeModalSafely();
   });
 
   function fail(form, msg) {
