@@ -842,8 +842,30 @@ dialog::backdrop {
 }
 
 .logo {
-  font-size: 3rem;
-  text-align: center;
+  display: block;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 8px;
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+
+/* Écran de chargement : l'icône respire doucement. */
+.loading .logo {
+  animation: breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  50% {
+    transform: scale(0.92);
+    opacity: 0.7;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading .logo {
+    animation: none;
+  }
 }
 
 .welcome h1 {

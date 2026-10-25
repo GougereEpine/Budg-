@@ -797,13 +797,13 @@
   // ---------- Écrans d'accueil ----------
 
   function renderLoading() {
-    view.innerHTML = '<div class="welcome"><div class="logo">💞</div><p class="tagline">Chargement…</p></div>';
+    view.innerHTML = '<div class="welcome loading"><img class="logo" src="icons/icon-192.png" alt=""><p class="tagline">Chargement…</p></div>';
   }
 
   function renderLocalSetup() {
     view.innerHTML = `
       <div class="welcome">
-        <div class="logo">💞</div>
+        <img class="logo" src="icons/icon-192.png" alt="">
         <h1>Budg'</h1>
         <p class="tagline">Le budget à deux, sans prise de tête.</p>
         <form class="card" id="setup">
@@ -836,7 +836,7 @@
     let signup = false;
     view.innerHTML = `
       <div class="welcome">
-        <div class="logo">💞</div>
+        <img class="logo" src="icons/icon-192.png" alt="">
         <h1>Budg'</h1>
         <p class="tagline">Le budget à deux, synchronisé entre vos deux téléphones.</p>
         <form class="card" id="auth">
@@ -888,7 +888,7 @@
   function renderHousehold() {
     view.innerHTML = `
       <div class="welcome">
-        <div class="logo">💞</div>
+        <img class="logo" src="icons/icon-192.png" alt="">
         <h1>Votre couple</h1>
         <p class="tagline">Créez votre budget commun, ou rejoignez celui de votre moitié.</p>
         <form class="card" id="create">
@@ -1701,7 +1701,7 @@
         <button class="icon-btn" data-goto="home" aria-label="Retour">✕</button></div>
 
       <form class="card" id="couple">
-        <h2 style="margin-top:0">💞 Le couple</h2>
+        <h2 style="margin-top:0">👫 Le couple</h2>
         <div class="row">
           <label class="field"><span><i class="dot a"></i>Personne 1</span><input name="nameA" value="${esc(name('a'))}" required maxlength="30"></label>
           <label class="field"><span><i class="dot b"></i>Personne 2</span><input name="nameB" value="${esc(name('b'))}" required maxlength="30"></label>
@@ -1764,7 +1764,7 @@
                <button type="button" class="btn danger block" data-reset>Tout effacer</button>`
         }
       </div>
-      <p class="small muted" style="text-align:center">Budg' · fait avec 💞</p>`;
+      <p class="small muted" style="text-align:center">Budg'</p>`;
 
     const couple = view.querySelector('#couple');
     bindSplitSetup(couple, () => [couple.nameA.value, couple.nameB.value]);
