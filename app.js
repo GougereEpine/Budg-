@@ -1173,14 +1173,9 @@
              <div class="code">${esc(S.inviteCode)}</div></div>`
         : '';
 
-    const budgets = an.categories.filter((c) => c.budget > 0);
     let alertsHtml = an.alerts.slice(0, 3).map(alertHtml).join('');
     if (an.alerts.length > 3) {
       alertsHtml += `<button class="btn link" data-goto="budget">+ ${an.alerts.length - 3} autre(s) alerte(s) →</button>`;
-    }
-    if (!an.alerts.length && budgets.length && an.total > 0) {
-      alertsHtml = `<div class="alert good"><span class="ico">✅</span><div><strong>Tout est dans les clous</strong>
-        Aucun budget dépassé ce mois-ci.</div></div>`;
     }
 
     // « Masquer les fixes » : on ne compte que les dépenses ponctuelles.
