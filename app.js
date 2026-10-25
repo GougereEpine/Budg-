@@ -2181,6 +2181,11 @@
     }
   });
 
+  // Safari iOS ignore « user-scalable=no » : on bloque aussi le pincement ici.
+  ['gesturestart', 'gesturechange'].forEach((type) =>
+    document.addEventListener(type, (ev) => ev.preventDefault(), { passive: false })
+  );
+
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch((e) => console.warn('service worker', e));
   }

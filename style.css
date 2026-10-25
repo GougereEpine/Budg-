@@ -1173,3 +1173,51 @@ label.field {
 .item-wrap .sub {
   white-space: normal;
 }
+
+/* Pas de zoom sur mobile : pas de double-tap, et les champs restent à 16 px
+   (en dessous, l'iPhone zoome automatiquement quand on les touche). */
+html {
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+input,
+select,
+textarea,
+.cat-edit select {
+  font-size: 16px;
+}
+
+/* Catégories : nom en entier sur la 1re ligne, budget et période sur la 2e. */
+.cat-edit {
+  grid-template-columns: 52px minmax(0, 1fr) 96px 36px;
+  grid-template-areas:
+    'icon name name del'
+    'icon budget period period';
+  row-gap: 6px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cat-edit > :nth-child(1) {
+  grid-area: icon;
+  align-self: stretch;
+}
+
+.cat-edit > :nth-child(2) {
+  grid-area: name;
+}
+
+.cat-edit > :nth-child(3) {
+  grid-area: budget;
+}
+
+.cat-edit > :nth-child(4) {
+  grid-area: period;
+}
+
+.cat-edit > :nth-child(5) {
+  grid-area: del;
+}
