@@ -1135,3 +1135,22 @@ label.field {
 .sync-banner strong {
   margin-right: 4px;
 }
+
+/* Barre « qui a payé » avec repère de la part de chacun. */
+.split-wrap {
+  position: relative;
+}
+
+.share-mark {
+  position: absolute;
+  top: 2px;
+  bottom: -4px;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--text);
+}
+
+.split-wrap .split-bar {
+  height: 12px;
+}

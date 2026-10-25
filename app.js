@@ -1037,13 +1037,25 @@
       c.diffA === 0
         ? '✅ Chacun a financé exactement sa part ce mois-ci.'
         : `${esc(name(c.diffA > 0 ? 'a' : 'b'))} a financé <b>${euro(Math.abs(c.diffA))}</b> de plus que sa part ce mois-ci.`;
+    // Une seule barre : qui a payé (couleurs) et un repère à l'endroit où la
+    // barre devrait s'arrêter si chacun avait payé exactement sa part.
+    const paidTotal = pos.a + pos.b;
+    const shareTotal = c.share.a + c.share.b;
+    const pa = paidTotal ? (pos.a / paidTotal) * 100 : 50;
+    const mark = shareTotal ? Math.min(100, Math.max(0, (c.share.a / shareTotal) * 100)) : 50;
     return `
-      <div class="small muted">Financé par chacun${hide ? ' — hors charges fixes' : ''}${transfers ? ' (virements compris)' : ''}</div>
-      ${splitBar(pos, euro(c.funded.a), euro(c.funded.b))}
-      <p class="small muted" style="margin:6px 0 0">Payé directement : ${esc(name('a'))} ${euro(c.paid.a)} · ${esc(name('b'))} ${euro(c.paid.b)}${transfers ? `<br>${transfers}` : ''}</p>
-      <div class="small muted" style="margin-top:12px">Part de chacun</div>
-      ${splitBar(c.share, euro(c.share.a), euro(c.share.b))}
-      <p class="small" style="margin:12px 0 0">${conclusion}</p>`;
+      <div class="small muted">Qui a payé${hide ? ' — hors charges fixes' : ''}${transfers ? ' (virements compris)' : ''}</div>
+      <div class="split-wrap">
+        <div class="split-bar"><div class="pa" style="width:${pa}%"></div><div class="pb" style="width:${100 - pa}%"></div></div>
+        <div class="share-mark" style="left:${mark}%" title="Part de chacun"></div>
+      </div>
+      <div class="legend">
+        <div><div><i class="dot a"></i>${esc(name('a'))} <b class="num">${euro(c.funded.a)}</b></div><div class="muted">part ${euro(c.share.a)}</div></div>
+        <div style="text-align:right"><div><b class="num">${euro(c.funded.b)}</b> ${esc(name('b'))}<i class="dot b" style="margin-left:4px"></i></div><div class="muted">part ${euro(c.share.b)}</div></div>
+      </div>
+      ${transfers ? `<p class="small muted" style="margin:6px 0 0">Dont ${transfers.replace(/^\+ /, '').replace(/ · \+ /g, ' · ')}</p>` : ''}
+      <p class="small" style="margin:10px 0 0">${conclusion}</p>
+      <p class="small muted" style="margin:4px 0 0">┃ = où la barre s'arrêterait si chacun payait exactement sa part.</p>`;
   }
 
   function splitBar(values, labelA, labelB) {
