@@ -732,7 +732,7 @@ input[type='range'] {
   border: 0;
   background: none;
   font: inherit;
-  font-size: 0.66rem;
+  font-size: 0.7rem;
   white-space: nowrap;
   color: var(--muted);
   display: flex;
@@ -1153,4 +1153,14 @@ label.field {
 
 .split-wrap .split-bar {
   height: 12px;
+}
+
+.card.item.shop-link {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.shop-link .chev {
+  color: var(--muted);
+  font-size: 1.4rem;
 }

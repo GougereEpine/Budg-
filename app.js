@@ -1205,6 +1205,7 @@
       </div>
       ${invite}
       ${balanceHtml}
+      ${shoppingCard()}
       ${carReminder(cur)}
       ${alertsHtml ? `<h2>Alertes de ${monthLabel(cur, true)}</h2>${alertsHtml}` : ''}
       ${notifSuggestion()}
@@ -1851,6 +1852,23 @@
 
   // ---------- Liste de courses ----------
 
+  // Carte d'accès à la liste de courses, sur l'accueil.
+  function shoppingCard() {
+    const todo = S.state.shopping.filter((i) => !i.done).sort((x, y) => x.position - y.position);
+    const inCart = S.state.shopping.length - todo.length;
+    const preview = todo.length
+      ? `${todo.length} à acheter : ${esc(todo.slice(0, 3).map((i) => i.label).join(', '))}${todo.length > 3 ? '…' : ''}`
+      : inCart
+        ? `${inCart} dans le panier`
+        : 'Vide · touchez pour ajouter des articles';
+    return `
+      <div class="card item shop-link" data-goto="shopping" role="button">
+        <div class="emoji">🛒</div>
+        <div class="body"><div class="title">Liste de courses</div><div class="sub">${preview}</div></div>
+        <span class="chev" aria-hidden="true">›</span>
+      </div>`;
+  }
+
   function renderShopping() {
     const items = [...S.state.shopping].sort((x, y) => x.done - y.done || x.position - y.position);
     const todo = items.filter((i) => !i.done);
@@ -1862,7 +1880,10 @@
         <button class="icon-btn small-btn" data-shop-del="${i.id}" aria-label="Retirer ${esc(i.label)}">✕</button>
       </div>`;
     view.innerHTML = `
-      <div class="topbar"><h1>Liste de courses</h1></div>
+      <div class="topbar">
+        <button class="icon-btn" data-goto="home" aria-label="Retour à l'accueil">‹</button>
+        <h1 style="flex:1">Liste de courses</h1>
+      </div>
       <form class="shop-add" id="shop-add">
         <input name="shopLabel" placeholder="Ajouter : lait, pain, shampoing…" maxlength="80" autocomplete="off" enterkeyhint="done">
         <button class="btn primary" aria-label="Ajouter">＋</button>
@@ -1931,7 +1952,9 @@
     const focused = document.activeElement;
     if (ui.tab === 'settings' && focused && view.contains(focused) && focused.matches('input')) return;
     tabs.hidden = false;
-    tabs.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === ui.tab));
+    // La liste et les réglages s'ouvrent depuis l'accueil : c'est lui qui reste surligné.
+    const navTab = ui.tab === 'shopping' || ui.tab === 'settings' ? 'home' : ui.tab;
+    tabs.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === navTab));
     // Une synchro ne doit pas faire perdre ce qu'on est en train de taper.
     const keep = focused && view.contains(focused) && focused.name && focused.matches('input')
       ? { name: focused.name, value: focused.value, start: focused.selectionStart, end: focused.selectionEnd }
