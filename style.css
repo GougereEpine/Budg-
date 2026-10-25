@@ -1164,3 +1164,12 @@ label.field {
   color: var(--muted);
   font-size: 1.4rem;
 }
+
+.warn-text {
+  color: var(--warn);
+}
+
+/* Lignes qui passent à la ligne au lieu d'être tronquées. */
+.item-wrap .sub {
+  white-space: normal;
+}

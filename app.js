@@ -1467,15 +1467,29 @@
       balanceText = `Chaque mois, ${esc(name(other(debtor)))} avance <b>${euro(Math.abs(diffA))}</b> de plus que sa part : c'est compté dans le solde. Ajoutez un remboursement automatique si ${esc(name(debtor))} fait un virement permanent.`;
     }
 
+    // Montant fixe : on rappelle la part réelle et l'écart (sur sa propre ligne).
+    const rtShareLine = (r) => {
+      const due = L.fixedChargesDebt(state, cur, r.from);
+      const gap = r.amount - due;
+      const gapText =
+        gap === 0
+          ? '<span class="down">✓ exact</span>'
+          : gap > 0
+            ? `<span class="warn-text">${euro(gap)} de trop</span>`
+            : `<span class="up">${euro(-gap)} de moins</span>`;
+      return `<div class="small muted">Sa part : <b class="num">${euro(due)}</b> · ${gapText}</div>`;
+    };
+
     const rtItem = (r) => {
       const amount = r.auto ? L.fixedChargesDebt(state, cur, r.from) : r.amount;
       const when = r.startMonth > cur ? `à partir de ${monthLabel(r.startMonth)}` : r.endMonth && r.endMonth < cur ? `terminé en ${monthLabel(r.endMonth)}` : `le ${r.day} du mois`;
       return `
-        <div class="item" data-recurring-transfer="${r.id}" style="${isActive(r) ? '' : 'opacity:.6'}">
+        <div class="item item-wrap" data-recurring-transfer="${r.id}" style="${isActive(r) ? '' : 'opacity:.6'}">
           <div class="emoji">💸</div>
           <div class="body">
             <div class="title">${esc(name(r.from))} → ${esc(name(r.to))}</div>
-            <div class="sub">${r.auto ? 'Sa part des charges fixes' : `Montant fixe (sa part : ${euro(L.fixedChargesDebt(state, cur, r.from))})`} · ${esc(when)}${r.note ? ' · ' + esc(r.note) : ''}</div>
+            <div class="sub">${r.auto ? 'Sa part des charges fixes' : 'Montant fixe'} · ${esc(when)}${r.note ? ' · ' + esc(r.note) : ''}</div>
+            ${r.auto ? '' : rtShareLine(r)}
           </div>
           <div class="right"><div class="amt num">${euro(amount)}<span class="small muted">/mois</span></div></div>
         </div>`;
