@@ -320,7 +320,7 @@
           ${opt('a', `Tout pour ${name('a')}`)}
           ${opt('b', `Tout pour ${name('b')}`)}
           ${opt('custom', 'Personnalisée…')}
-          ${opt('car', "🚗 Selon l'usage de la voiture (essence…)")}
+          ${mode === 'car' ? opt('car', "🚗 Selon l'usage de la voiture (essence…)") : ''}
         </select>
       </label>
       <p class="hint" data-usage-hint ${mode === 'car' ? '' : 'hidden'}>${usageHint(month)}</p>
