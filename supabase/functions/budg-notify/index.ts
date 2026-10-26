@@ -5,6 +5,7 @@
 //                             nouveau remboursement : notifie les appareils de l'autre
 // - POST + x-budg-secret + { type: 'monthly' } -> bilan du mois écoulé (pg_cron, le 1er du mois)
 // - POST + x-budg-secret + { type: 'shopping' } -> articles ajoutés à la liste, groupés (pg_cron)
+// - POST + x-budg-secret + { type: 'reminder' } -> rappel de règlement au-delà du seuil (pg_cron)
 // - POST + Authorization   -> { test: true } : notification de test vers ses propres appareils
 //                             { preview: 'monthly' } : son bilan du mois dernier, tout de suite
 import webpush from 'npm:web-push@3.6.7';
@@ -279,6 +280,41 @@ async function sendShoppingDigest() {
   return sent;
 }
 
+// ---------- Rappel de règlement ----------
+
+const WEEK_MS = 6.5 * 24 * 60 * 60 * 1000; // au plus un rappel par semaine
+
+async function sendReminders() {
+  const { data: houses } = await supabase
+    .from('budg_households')
+    .select('id, reminder_threshold, last_reminder_at')
+    .not('reminder_threshold', 'is', null);
+  let sent = 0;
+  for (const h of houses || []) {
+    if (h.last_reminder_at && Date.now() - Date.parse(h.last_reminder_at) < WEEK_MS) continue;
+    const state = await loadState(h.id);
+    const bal = L.computeBalance(state, parisToday().slice(0, 7));
+    if (!bal.debtor || bal.amount < h.reminder_threshold) continue;
+    const [{ data: members }, { data: subs }] = await Promise.all([
+      supabase.from('budg_members').select('user_id, person').eq('household_id', h.id),
+      supabase.from('budg_push_subscriptions').select('id, endpoint, p256dh, auth, user_id').eq('household_id', h.id),
+    ]);
+    const debtor = (members || []).find((m) => m.person === bal.debtor);
+    const mySubs = (subs || []).filter((s) => debtor && s.user_id === debtor.user_id);
+    if (!mySubs.length) continue;
+    const creditor = state.people.find((p: { id: string }) => p.id === bal.creditor).name;
+    const n = await sendTo(mySubs, {
+      title: `💸 Petit rappel : ${euro(bal.amount)} à régler`,
+      body: `Tu dois ${euro(bal.amount)} à ${creditor}. Touche « Régler » dans Budg’ une fois le virement fait.`,
+      url: './',
+      tag: `budg-rappel-${h.id}`,
+    });
+    if (n) await supabase.from('budg_households').update({ last_reminder_at: new Date().toISOString() }).eq('id', h.id);
+    sent += n;
+  }
+  return sent;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   try {
@@ -297,6 +333,7 @@ Deno.serve(async (req) => {
       if (secret !== config.webhook_secret) return json({ error: 'forbidden' }, 403);
       if (body.type === 'monthly') return json({ sent: await sendMonthly() });
       if (body.type === 'shopping') return json({ sent: await sendShoppingDigest() });
+      if (body.type === 'reminder') return json({ sent: await sendReminders() });
       const sent = await notifyPartner(body.table, body.record || {}, body.actor || null);
       return json({ sent });
     }

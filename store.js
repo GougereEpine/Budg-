@@ -67,6 +67,9 @@
       recurringTransfers: [],
       carUsage: {},
       shopping: [],
+      goals: [],
+      goalContributions: [],
+      reminderThreshold: null,
     };
   }
 
@@ -175,6 +178,16 @@
         createdBy: r.created_by,
       }),
     },
+    goals: {
+      table: 'budg_goals',
+      toRow: (g) => ({ id: g.id, name: g.name, icon: g.icon, target: g.target, deadline: g.deadline || null, position: g.position || 0 }),
+      fromRow: (r) => ({ id: r.id, name: r.name, icon: r.icon, target: r.target, deadline: r.deadline, position: r.position }),
+    },
+    goalContributions: {
+      table: 'budg_goal_contributions',
+      toRow: (c) => ({ id: c.id, goal_id: c.goalId, person: c.person, amount: c.amount, date: c.date, note: c.note || '' }),
+      fromRow: (r) => ({ id: r.id, goalId: r.goal_id, person: r.person, amount: r.amount, date: r.date, note: r.note }),
+    },
     shopping: {
       table: 'budg_shopping_items',
       toRow: (x) => ({ id: x.id, label: x.label, done: x.done, position: x.position }),
@@ -259,7 +272,7 @@
       if (savedMode === 'local') {
         this.mode = 'local';
         this.state = readJSON(LOCAL_KEY);
-        if (this.state) this.state = { recurringTransfers: [], carUsage: {}, shopping: [], ...this.state };
+        if (this.state) this.state = { recurringTransfers: [], carUsage: {}, shopping: [], goals: [], goalContributions: [], ...this.state };
         return this.state ? 'ready' : 'welcome';
       }
       if (!this.cloudConfigured()) return 'welcome';
@@ -286,7 +299,7 @@
       this.user = this.user || cache.user;
       this.inviteCode = cache.inviteCode;
       this.partnerJoined = cache.partnerJoined;
-      this.state = { recurringTransfers: [], carUsage: {}, shopping: [], ...cache.state };
+      this.state = { recurringTransfers: [], carUsage: {}, shopping: [], goals: [], goalContributions: [], ...cache.state };
       this.offline = true;
       this.subscribe();
       return 'ready';
@@ -351,7 +364,7 @@
 
       const cache = readJSON(CACHE_KEY);
       if (cache && cache.householdId === this.householdId) {
-        this.state = { recurringTransfers: [], carUsage: {}, shopping: [], ...cache.state };
+        this.state = { recurringTransfers: [], carUsage: {}, shopping: [], goals: [], goalContributions: [], ...cache.state };
       }
       this.subscribe();
       try {
@@ -385,7 +398,7 @@
     async fetchAll() {
       const hid = this.householdId;
       const q = (table) => this.client.from(table).select('*').eq('household_id', hid);
-      const [house, members, cats, exps, recs, trs, rtrs, usage, shop] = await Promise.all([
+      const [house, members, cats, exps, recs, trs, rtrs, usage, shop, goals, contribs] = await Promise.all([
         this.client.from('budg_households').select('*').eq('id', hid).single(),
         this.client.from('budg_members').select('person').eq('household_id', hid),
         q('budg_categories').order('position'),
@@ -395,8 +408,10 @@
         q('budg_recurring_transfers'),
         q('budg_car_usage'),
         q('budg_shopping_items').order('position'),
+        q('budg_goals').order('position'),
+        q('budg_goal_contributions'),
       ]);
-      for (const res of [house, members, cats, exps, recs, trs, rtrs, usage, shop]) if (res.error) throw res.error;
+      for (const res of [house, members, cats, exps, recs, trs, rtrs, usage, shop, goals, contribs]) if (res.error) throw res.error;
 
       const h = house.data;
       this.inviteCode = h.invite_code;
@@ -414,6 +429,9 @@
         recurringTransfers: rtrs.data.map(TABLES.recurringTransfers.fromRow),
         carUsage: Object.fromEntries(usage.data.map((u) => [u.month, u.split])),
         shopping: shop.data.map(TABLES.shopping.fromRow),
+        goals: goals.data.map(TABLES.goals.fromRow),
+        goalContributions: contribs.data.map(TABLES.goalContributions.fromRow),
+        reminderThreshold: h.reminder_threshold,
       };
       // Ce qui n'est pas encore parti reste visible.
       for (const op of this.outbox) this.applyOp(op);
@@ -453,6 +471,8 @@
             op.split == null
               ? await table.delete().eq('household_id', hid).eq('month', op.month)
               : await table.upsert({ household_id: hid, month: op.month, split: op.split });
+        } else if (op.type === 'reminder') {
+          res = await this.client.from('budg_households').update({ reminder_threshold: op.threshold }).eq('id', hid);
         } else if (op.type === 'settings') {
           res = await this.client
             .from('budg_households')
@@ -478,6 +498,8 @@
       } else if (op.type === 'carUsage') {
         if (op.split == null) delete st.carUsage[op.month];
         else st.carUsage[op.month] = op.split;
+      } else if (op.type === 'reminder') {
+        st.reminderThreshold = op.threshold;
       } else if (op.type === 'settings') {
         st.people[0].name = op.nameA;
         st.people[1].name = op.nameB;
@@ -676,6 +698,10 @@
       const i = list.findIndex((x) => x.id === id);
       if (i < 0) return;
       const [removed] = list.splice(i, 1);
+      if (kind === 'goals') {
+        // Comme en base (on delete cascade) : les versements du projet disparaissent aussi.
+        this.state.goalContributions = this.state.goalContributions.filter((c) => c.goalId !== id);
+      }
       if (kind === 'categories') {
         // Comme en base (on delete set null) : les dépenses restent, sans catégorie.
         for (const e of this.state.expenses) if (e.categoryId === id) e.categoryId = null;
@@ -698,6 +724,14 @@
       });
     },
 
+    // Seuil du rappel de règlement (centimes), null = pas de rappel.
+    async setReminderThreshold(threshold) {
+      const previous = this.state.reminderThreshold;
+      this.state.reminderThreshold = threshold;
+      this.emit();
+      await this.write({ type: 'reminder', threshold }, () => (this.state.reminderThreshold = previous));
+    },
+
     async updateSettings({ nameA, nameB, defaultSplit }) {
       this.state.people[0].name = nameA;
       this.state.people[1].name = nameB;
@@ -712,12 +746,12 @@
         throw new Error('Fichier de sauvegarde invalide');
       }
       if (this.mode === 'local') {
-        this.state = { recurringTransfers: [], carUsage: {}, shopping: [], ...data };
+        this.state = { recurringTransfers: [], carUsage: {}, shopping: [], goals: [], goalContributions: [], ...data };
         this.emit();
         return;
       }
       const hid = this.householdId;
-      for (const kind of ['categories', 'expenses', 'recurring', 'transfers', 'recurringTransfers', 'shopping']) {
+      for (const kind of ['categories', 'expenses', 'recurring', 'transfers', 'recurringTransfers', 'shopping', 'goals', 'goalContributions']) {
         const rows = (data[kind] || []).map((x) => ({ ...TABLES[kind].toRow(x), household_id: hid }));
         if (!rows.length) continue;
         const { error } = await this.client.from(TABLES[kind].table).upsert(rows);

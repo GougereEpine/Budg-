@@ -385,3 +385,21 @@ test('favoris : dépenses fréquentes des 4 derniers mois', () => {
   assert.deepEqual(fav.map((f) => [f.label, f.count, f.amount]), [['lidl', 3, 4500], ['Boulangerie', 2, 520]]);
   assert.equal(fav[0].payer, 'b');
 });
+
+test('projet d\'épargne : progression et versement mensuel nécessaire', () => {
+  const s = baseState({
+    goals: [{ id: 'g', name: 'Japon', icon: '🗾', target: 300000, deadline: '2027-03' }],
+    goalContributions: [
+      { id: '1', goalId: 'g', person: 'a', amount: 50000, date: '2026-09-01' },
+      { id: '2', goalId: 'g', person: 'b', amount: 30000, date: '2026-10-01' },
+      { id: '3', goalId: 'g', person: 'a', amount: -10000, date: '2026-10-15' }, // retrait
+    ],
+  });
+  const p = L.goalProgress(s, s.goals[0], '2026-10-26');
+  assert.deepEqual(p.byPerson, { a: 40000, b: 30000 });
+  assert.equal(p.saved, 70000);
+  assert.equal(p.pct, 23);
+  assert.equal(p.monthsLeft, 6); // octobre -> mars inclus
+  assert.equal(p.perMonth, Math.ceil(230000 / 6));
+  assert.equal(L.goalProgress(s, { id: 'x', target: 1000 }, '2026-10-26').perMonth, null);
+});

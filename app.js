@@ -1132,6 +1132,137 @@
 
   // ---------- Onglets ----------
 
+  // ---------- Projets d'épargne ----------
+
+  function goalsSection() {
+    const goals = [...(S.state.goals || [])].sort((x, y) => x.position - y.position);
+    const row = (g) => {
+      const p = L.goalProgress(S.state, g, today());
+      const plan =
+        p.done
+          ? '🎉 Objectif atteint !'
+          : g.deadline
+            ? p.monthsLeft > 0
+              ? `${esc(monthLabel(g.deadline))} · <b>${euro(p.perMonth)}/mois</b> à mettre de côté`
+              : `Échéance dépassée · il manque ${euro(p.remaining)}`
+            : `il reste ${euro(p.remaining)}`;
+      return `
+        <div class="budget-row ${p.done ? 'level-ok' : ''}" data-goal="${g.id}">
+          <div class="budget-head">
+            <span class="name">${esc(g.icon)} ${esc(g.name)}</span>
+            <span class="num">${euro(p.saved)} <span class="muted small">/ ${euro(g.target)}</span> <span class="pill ${p.done ? 'ok' : 'a'}">${p.pct} %</span></span>
+          </div>
+          <div class="bar"><div class="fill" style="width:${p.pct}%;background:var(--a)"></div></div>
+          <div class="small muted">${esc(name('a'))} ${euro(p.byPerson.a)} · ${esc(name('b'))} ${euro(p.byPerson.b)}</div>
+          <div class="small muted">${plan}</div>
+        </div>`;
+    };
+    return `
+      <div class="topbar"><h2>🎯 Projets d'épargne</h2>
+        <button class="icon-btn" data-add-goal aria-label="Nouveau projet">＋</button></div>
+      <div class="card" style="padding-top:4px;padding-bottom:4px">
+        ${goals.length ? goals.map(row).join('') : `<div class="empty">Vacances, voiture, apport… : mettez de côté à deux et suivez la progression.<br><br><button class="btn" data-add-goal>＋ Créer un projet</button></div>`}
+      </div>`;
+  }
+
+  function goalForm(existing) {
+    const g = existing || { id: S.newId(), name: '', icon: '🎯', target: 0, deadline: null, position: Date.now() };
+    openModal(
+      existing ? 'Modifier le projet' : "Nouveau projet d'épargne",
+      `
+      <div class="row">
+        <label class="field" style="flex:0 0 72px"><span>Icône</span><input name="icon" value="${esc(g.icon)}" maxlength="8" style="text-align:center"></label>
+        <label class="field"><span>Nom</span><input name="name" value="${esc(g.name)}" maxlength="60" placeholder="Japon 2027, voiture…" required></label>
+      </div>
+      <label class="field"><span>Objectif</span>
+        <input class="big" name="amount" inputmode="decimal" placeholder="0 €" value="${amountValue(g.target)}" required autocomplete="off"></label>
+      <label class="field"><span>Pour quand ? (facultatif)</span>
+        <input type="month" name="deadline" value="${g.deadline || ''}"></label>
+      <p class="hint">Avec une date, l'appli calcule combien mettre de côté chaque mois.</p>`,
+      {
+        onSubmit: async (form) => {
+          const target = readAmount(form);
+          if (!target) return fail(form, 'Objectif invalide');
+          await S.save('goals', {
+            ...g,
+            name: form.name.value.trim(),
+            icon: form.icon.value.trim() || '🎯',
+            target,
+            deadline: form.deadline.value || null,
+          });
+          toast(existing ? 'Projet modifié' : 'Projet créé');
+        },
+        onDelete: existing ? () => S.remove('goals', g.id) : null,
+      }
+    );
+  }
+
+  // Fiche d'un projet : versements et ajout d'un versement (ou retrait).
+  function goalDetail(goal) {
+    const p = L.goalProgress(S.state, goal, today());
+    const contribs = (S.state.goalContributions || [])
+      .filter((c) => c.goalId === goal.id)
+      .sort((x, y) => (x.date < y.date ? 1 : -1));
+    openModal(
+      `${goal.icon} ${goal.name}`,
+      `
+      <p style="margin-top:0"><b class="num">${euro(p.saved)}</b> <span class="muted">sur ${euro(goal.target)} · ${p.pct} %</span></p>
+      <div class="seg" style="margin-bottom:12px">
+        <label><input type="radio" name="dir" value="in" checked><span>➕ Versement</span></label>
+        <label><input type="radio" name="dir" value="out"><span>➖ Retrait</span></label>
+      </div>
+      <label class="field"><span>Montant</span>
+        <input class="big" name="amount" inputmode="decimal" placeholder="0 €" required autocomplete="off"></label>
+      ${payerField(me(), 'person', 'Qui ?')}
+      <label class="field"><span>Date</span><input type="date" name="date" value="${today()}" required></label>
+      ${
+        contribs.length
+          ? `<div class="small muted" style="margin:4px 0 6px">Historique</div>
+             <div class="card list" style="padding:0 12px">${contribs
+               .map(
+                 (c) => `<div class="item" style="padding:8px 0;cursor:default">
+                   <div class="body"><div class="title" style="font-weight:500">${c.amount > 0 ? '➕' : '➖'} ${euro(Math.abs(c.amount))} · ${esc(name(c.person))}</div>
+                   <div class="sub">${esc(dayLabel(c.date))}</div></div>
+                   <button type="button" class="icon-btn small-btn" data-del-contrib="${c.id}" aria-label="Supprimer ce versement">✕</button>
+                 </div>`
+               )
+               .join('')}</div>`
+          : ''
+      }
+      <button type="button" class="btn link" data-edit-goal>✏️ Modifier ou supprimer le projet</button>`,
+      {
+        submitLabel: 'Ajouter',
+        onOpen: (form) => {
+          form.querySelector('[data-edit-goal]').onclick = () => {
+            modal.close();
+            goalForm(goal);
+          };
+          form.querySelectorAll('[data-del-contrib]').forEach((b) => {
+            b.onclick = async () => {
+              if (!confirm('Supprimer ce versement ?')) return;
+              modal.close();
+              await run(S.remove('goalContributions', b.dataset.delContrib), 'Versement supprimé');
+            };
+          });
+        },
+        onSubmit: async (form) => {
+          const amount = readAmount(form);
+          if (!amount) return fail(form, 'Montant invalide');
+          const sign = form.dir.value === 'out' ? -1 : 1;
+          await S.save('goalContributions', {
+            id: S.newId(),
+            goalId: goal.id,
+            person: form.person.value,
+            amount: sign * amount,
+            date: form.date.value,
+            note: '',
+          });
+          toast(sign > 0 ? `${euro(amount)} mis de côté 🎉` : `${euro(amount)} retirés`);
+        },
+      }
+    );
+  }
+
   // ---------- Usage de la voiture ----------
 
   function usesCar() {
@@ -1709,6 +1840,7 @@
 
       ${an.alerts.length ? `<h2>Alertes</h2>${an.alerts.map(alertHtml).join('')}` : ''}
       ${carCard(ui.month)}
+      ${goalsSection()}
 
       <h2>Budgets par catégorie</h2>
       <div class="card" style="padding-top:4px;padding-bottom:4px">
@@ -1735,6 +1867,7 @@
       </div>`;
 
     bindCarCard(ui.month);
+    view.querySelectorAll('[data-add-goal]').forEach((b) => (b.onclick = () => goalForm(null)));
     view.querySelector('[data-hide-fixed]').onclick = () => {
       ui.hideFixed = !ui.hideFixed;
       writePref('budg-hide-fixed', ui.hideFixed ? '1' : '0');
@@ -1803,7 +1936,13 @@
         <h2 style="margin-top:0">🔔 Notifications</h2>
         <p class="small muted" data-notif-status style="margin:0 0 10px">…</p>
         <div class="row" data-notif-actions style="flex-wrap:wrap"></div>
-      </div>` : ''}
+      </div>
+      <form class="card" id="reminder">
+        <h2 style="margin-top:0">⏰ Rappel de règlement</h2>
+        <label class="field"><span>Prévenir quand le solde dépasse</span>
+          <input name="threshold" inputmode="decimal" placeholder="Pas de rappel" value="${amountValue(state.reminderThreshold)}" autocomplete="off"></label>
+        <p class="hint" style="margin-bottom:0">La personne qui doit de l'argent reçoit une notification (au plus une par semaine) tant que le solde reste au-dessus. Laissez vide pour ne pas être rappelé.</p>
+      </form>` : ''}
 
       <div class="card">
         <h2 style="margin-top:0">💾 Données</h2>
@@ -1837,6 +1976,22 @@
         'Enregistré'
       );
     };
+
+    const reminder = view.querySelector('#reminder');
+    if (reminder) {
+      const saveThreshold = () => {
+        const v = reminder.threshold.value.trim();
+        const cents = v === '' ? null : L.parseAmount(v);
+        if (cents !== null && !(cents > 0)) return toast('⚠️ Montant invalide');
+        if (cents === state.reminderThreshold) return;
+        run(S.setReminderThreshold(cents), cents ? `Rappel au-delà de ${euro(cents)}` : 'Rappel désactivé');
+      };
+      reminder.threshold.onchange = saveThreshold;
+      reminder.onsubmit = (ev) => {
+        ev.preventDefault();
+        reminder.threshold.blur();
+      };
+    }
 
     view.querySelectorAll('[data-cat]').forEach((rowEl) => {
       const id = rowEl.dataset.cat;
@@ -2164,10 +2319,15 @@
   // Délégation des clics dans la vue.
   view.addEventListener('click', (ev) => {
     const t = ev.target.closest(
-      '[data-expense],[data-transfer],[data-recurring-transfer],[data-recurring],[data-category],[data-month],[data-filter],[data-goto],[data-settings]'
+      '[data-goal],[data-expense],[data-transfer],[data-recurring-transfer],[data-recurring],[data-category],[data-month],[data-filter],[data-goto],[data-settings]'
     );
     if (!t) return;
     const d = t.dataset;
+    if (d.goal) {
+      const g = (S.state.goals || []).find((x) => x.id === d.goal);
+      if (g) goalDetail(g);
+      return;
+    }
     if (d.expense) {
       const real = S.state.expenses.find((e) => e.id === d.expense);
       if (real) return expenseForm(real);

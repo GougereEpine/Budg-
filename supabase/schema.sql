@@ -365,3 +365,46 @@ revoke execute on function budg_private.shopping_digest() from public, anon, aut
 select cron.schedule('budg-monthly-summary', '0 7 1 * *', $$select budg_private.call_notify('{"type":"monthly"}'::jsonb)$$);
 -- Liste de courses : vérification toutes les 5 minutes.
 select cron.schedule('budg-shopping-digest', '*/5 * * * *', $$select budg_private.shopping_digest()$$);
+
+-- ---------- Projets d'épargne ----------
+create table public.budg_goals (
+  id uuid primary key,
+  household_id uuid not null references public.budg_households (id) on delete cascade,
+  name text not null check (char_length(name) between 1 and 60),
+  icon text not null default '🎯',
+  target int not null check (target > 0),
+  deadline text check (deadline ~ '^\d{4}-\d{2}$'),
+  position double precision not null default 0,
+  created_at timestamptz not null default now()
+);
+create index on public.budg_goals (household_id);
+
+create table public.budg_goal_contributions (
+  id uuid primary key,
+  household_id uuid not null references public.budg_households (id) on delete cascade,
+  goal_id uuid not null references public.budg_goals (id) on delete cascade,
+  person text not null check (person in ('a', 'b')),
+  amount int not null check (amount <> 0), -- négatif = retrait
+  date date not null,
+  note text not null default ''
+);
+create index on public.budg_goal_contributions (household_id);
+create index on public.budg_goal_contributions (goal_id);
+
+alter table public.budg_goals enable row level security;
+alter table public.budg_goal_contributions enable row level security;
+create policy "membres : tout" on public.budg_goals
+  for all to authenticated
+  using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
+create policy "membres : tout" on public.budg_goal_contributions
+  for all to authenticated
+  using (budg_private.budg_is_member(household_id)) with check (budg_private.budg_is_member(household_id));
+alter publication supabase_realtime add table public.budg_goals, public.budg_goal_contributions;
+
+-- ---------- Rappel de règlement ----------
+alter table public.budg_households
+  add column reminder_threshold int check (reminder_threshold > 0), -- null = pas de rappel
+  add column last_reminder_at timestamptz;
+
+-- Vérification tous les jours à 17 h UTC (18 h ou 19 h à Paris).
+select cron.schedule('budg-settle-reminder', '0 17 * * *', $$select budg_private.call_notify('{"type":"reminder"}'::jsonb)$$);

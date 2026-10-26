@@ -329,6 +329,32 @@
       }));
   }
 
+  // Projet d'épargne : déjà mis de côté (total et par personne), % de l'objectif,
+  // et ce qu'il faut mettre chaque mois pour tenir l'échéance (mois inclus).
+  function goalProgress(state, goal, today) {
+    const contribs = (state.goalContributions || []).filter((c) => c.goalId === goal.id);
+    const byPerson = { a: 0, b: 0 };
+    for (const c of contribs) byPerson[c.person] += c.amount;
+    const saved = byPerson.a + byPerson.b;
+    const remaining = Math.max(0, goal.target - saved);
+    let monthsLeft = null;
+    let perMonth = null;
+    if (goal.deadline) {
+      const cur = monthKey(today);
+      monthsLeft = goal.deadline < cur ? 0 : monthsRange(cur, goal.deadline).length;
+      perMonth = monthsLeft > 0 ? Math.ceil(remaining / monthsLeft) : remaining;
+    }
+    return {
+      saved,
+      byPerson,
+      remaining,
+      pct: Math.min(100, Math.round((saved / goal.target) * 100)),
+      done: saved >= goal.target,
+      monthsLeft,
+      perMonth,
+    };
+  }
+
   // Répartition proportionnelle aux revenus (en % pour a), arrondie à l'unité.
   function splitFromIncomes(incomeA, incomeB) {
     const sum = incomeA + incomeB;
@@ -484,6 +510,7 @@
 
   const api = {
     analyzeMonth,
+    goalProgress,
     normalizeLabel,
     guessCategory,
     favorites,
