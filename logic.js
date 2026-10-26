@@ -492,18 +492,18 @@
   }
 
   // Sans ligne TOTAL lisible : le total revient d'habitude plusieurs fois sur le
-  // ticket (total, reste à payer, paiement carte) ; on prend le plus grand montant
-  // vu au moins deux fois dans une même lecture, sinon le plus grand montant, et
-  // jamais moins que la somme des articles lus.
+  // ticket (total, reste à payer, paiement carte). On prend le plus grand montant
+  // vu au moins deux fois dans une même lecture s'il couvre les articles lus
+  // (deux articles au même prix ne font pas un total), et jamais moins que la
+  // somme des articles lus.
   function guessTotal(reads) {
     let best = 0;
     for (const r of reads) {
       const seen = {};
       for (const a of r.amounts) seen[a] = (seen[a] || 0) + 1;
-      const repeated = Object.keys(seen).filter((a) => seen[a] >= 2).map(Number);
       const sum = r.items.reduce((s, it) => s + it.amount, 0);
-      const guess = repeated.length ? Math.max(...repeated) : Math.max(0, ...r.amounts);
-      best = Math.max(best, guess, repeated.length ? 0 : sum);
+      const repeated = Object.keys(seen).map(Number).filter((a) => seen[a] >= 2 && a >= sum);
+      best = Math.max(best, sum, repeated.length ? Math.max(...repeated) : Math.max(0, ...r.amounts));
     }
     return best;
   }
