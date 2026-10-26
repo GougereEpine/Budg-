@@ -250,7 +250,9 @@ test('espace perso : dépense hors du couple, budget perso et vue totale', async
   await page.fill('#modal [name=label]', 'Basic Fit');
   await page.click('#modal button[type=submit]');
   assert.match(await text(page, '.balance'), /Lola doit à Maxime 50 €/);
-  assert.equal(await page.$$eval('#view .card.list [data-expense]', (x) => x.length), 1);
+  // Elle apparaît dans les dernières dépenses de l'accueil, marquée « perso ».
+  await page.waitForFunction(() => document.querySelectorAll('#view .card.list [data-expense]').length === 2);
+  assert.match(await text(page, '#view .card.list'), /Basic Fit.*👤 perso/);
 
   // Espace perso : part du couple + perso, budget perso dépassé.
   await page.click('[data-goto=perso]');

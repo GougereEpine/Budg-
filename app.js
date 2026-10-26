@@ -1609,7 +1609,12 @@
         : `<span class="${vsAvg > 0 ? 'up' : 'down'}">${vsAvg > 0 ? '+' : ''}${vsAvg} % vs moyenne</span>`;
 
     const shared = L.shared(state.expenses);
-    const recent = [...shared]
+    // Ses propres dépenses perso apparaissent aussi (hors ligne : celles des deux).
+    const mine = state.expenses
+      .filter((e) => e.owner && (S.mode !== 'cloud' || e.owner === me()))
+      .map((e) => ({ ...e, personal: e.owner }));
+    const recent = shared
+      .concat(mine)
       .sort((x, y) => (x.date === y.date ? 0 : x.date < y.date ? 1 : -1))
       .slice(0, 3);
 
@@ -1637,9 +1642,9 @@
         ${whoPaidHtml(cur, ui.hideFixedHome)}
       </div>
       <div class="topbar"><h2>Dernières dépenses</h2>
-        ${shared.length > 3 ? '<button class="btn link" data-goto="expenses">Tout voir ›</button>' : ''}</div>
+        ${shared.length + mine.length > 3 ? '<button class="btn link" data-goto="expenses">Tout voir ›</button>' : ''}</div>
       <div class="card list">
-        ${recent.length ? recent.map(expenseItem).join('') : '<div class="empty">Aucune dépense pour l\'instant.<br>Appuyez sur ＋ pour commencer.</div>'}
+        ${recent.length ? recent.map((e) => expenseItem(e)).join('') : '<div class="empty">Aucune dépense pour l\'instant.<br>Appuyez sur ＋ pour commencer.</div>'}
       </div>`;
 
     const settle = view.querySelector('[data-settle]');
