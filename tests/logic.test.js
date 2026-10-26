@@ -524,8 +524,8 @@ EU. SOLDE 111.00€
   assert.equal(r.total, 11100);
   assert.deepEqual(r.items.map((i) => [i.label, i.amount]), [
     ['GODEFROY 50CL', 800],
-    ['8 × CUVEE DES TROLES 2801', 3200],
-    ['2 × TAGLIATA BOEUF', 4600],
+    ['CUVEE DES TROLES 2801', 3200],
+    ['TAGLIATA BOEUF', 4600],
     ['CUISSE DE CANARD', 2000],
     ['BALLE DE MATCH', 500],
   ]);
@@ -546,7 +546,7 @@ Food excl Set Menus 159.80`;
   const r = L.parseReceipt(text);
   assert.equal(r.total, 24228);
   assert.deepEqual(r.items.map((i) => [i.label, i.amount]), [
-    ['2 × Chorizo Carbonara', 3700],
+    ['Chorizo Carbonara', 3700],
     ['Draught Guinness', 1050],
     ['OPTIONAL Team Tip', 2203],
   ]);
@@ -584,4 +584,16 @@ test('ticket de caisse : deux lectures de vraies photos (froissé, restaurant)',
   const cabanon = L.parseReceipt(read('ticket-cabanon.json'));
   assert.equal(cabanon.total, 11100);
   assert.equal(cabanon.items.reduce((s, i) => s + i.amount, 0), 11100);
+});
+
+test('ticket de caisse : total illisible, retrouvé car répété (reste à payer, carte)', () => {
+  const text = `T 2X SAUMON FUME NORVES 6.00 EUR 12.00 EUR
+NM 7 par FINE RECTANGU 7 2,19 EUR
+24 7E0FEULLEEEZO 1.89 EUR 3.78 EUR
+TOTL HRS PRMTON 64.31 EUR
+RESTE A PYER 64.31 EUR
+CARTE 64,31`;
+  const r = L.parseReceipt([text]);
+  assert.equal(r.total, 6431);
+  assert.deepEqual(r.items.map((i) => i.label), ['2 × SAUMON FUME NORVES', 'par FINE RECTANGU 7', '7E0FEULLEEEZO']);
 });

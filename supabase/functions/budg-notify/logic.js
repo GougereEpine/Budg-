@@ -442,7 +442,7 @@
   // Lecture d'un ticket de caisse (texte reconnu sur la photo) : les lignes
   // « article ... 1,99 », et le total (ligne TOTAL / SOLDE / À PAYER, sinon le
   // plus grand montant). Les lignes de paiement, TVA, rendu… ne sont pas des articles.
-  const RECEIPT_TOTAL = /\b(total|solde|a payer|net a payer|montant du|montant ttc|ttc|amount due|balance due|grand total)\b/;
+  const RECEIPT_TOTAL = /\b(total|solde|reste|a payer|net a payer|montant du|montant ttc|ttc|amount due|balance due|grand total)\b/;
   const RECEIPT_SUBTOTAL = /\b(sous ?total|sub ?total)\b/;
   const RECEIPT_SKIP = /\b(sous ?total|sub ?total|total|solde|a payer|cb|carte|visa|mastercard|especes|rendu|monnaie|tva|htva|ht|ttc|taux|montant|paiement|paye|regle|credit|debit|avoir|fidelite|cagnotte|ticket|merci|siret|tel|date|heure|caisse|transaction|aut|contactless|sans contact|pieces|articles|table|serv|vat|sales|rate|amt|change|cash|card|guests|chk|tbl|excl|balance)\b/;
   // Montant en fin de ligne (1,99 / 12.50 / -0,60), suivi éventuellement de la
@@ -481,12 +481,31 @@
       // Début de ligne : bruit de lecture (« a. », « m5 », colonne « T »…) puis quantité éventuelle.
       const words = before.replace(/[€*|]+/g, ' ').trim().split(/\s+/);
       const first = words.findIndex((w) => /[a-z]{3}/i.test(normalizeLabel(w)));
-      const q = before.match(/(?:^|[\sA-Za-z])(\d{1,2})[\s.]?[x×%*](?:\s|$)/i);
-      const qty = q ? Number(q[1]) : first > 0 && /^\d{1,2}$/.test(words[first - 1]) ? Number(words[first - 1]) : 1;
+      // Quantité seulement si elle est écrite « 2 X » : un chiffre seul en début de
+      // ligne est souvent une colonne mal lue (« T » lu « 7 »).
+      const q = before.match(/(?:^|[\sA-Za-z])(\d{1,2})[\s.]?[x×*](?:\s|$)/i);
+      const qty = q && Number(q[1]) <= 12 ? Number(q[1]) : 1;
       const label = words.slice(Math.max(0, first)).join(' ');
       items.push({ label: qty > 1 ? `${qty} × ${label}` : label, amount });
     }
     return { totals, amounts, items };
+  }
+
+  // Sans ligne TOTAL lisible : le total revient d'habitude plusieurs fois sur le
+  // ticket (total, reste à payer, paiement carte) ; on prend le plus grand montant
+  // vu au moins deux fois dans une même lecture, sinon le plus grand montant, et
+  // jamais moins que la somme des articles lus.
+  function guessTotal(reads) {
+    let best = 0;
+    for (const r of reads) {
+      const seen = {};
+      for (const a of r.amounts) seen[a] = (seen[a] || 0) + 1;
+      const repeated = Object.keys(seen).filter((a) => seen[a] >= 2).map(Number);
+      const sum = r.items.reduce((s, it) => s + it.amount, 0);
+      const guess = repeated.length ? Math.max(...repeated) : Math.max(0, ...r.amounts);
+      best = Math.max(best, guess, repeated.length ? 0 : sum);
+    }
+    return best;
   }
 
   // `text` : le texte lu, ou plusieurs lectures de la même photo (réglages
@@ -496,11 +515,11 @@
   function parseReceipt(text) {
     const reads = (Array.isArray(text) ? text : [text]).map(parseReceiptText);
     const totals = reads.flatMap((r) => r.totals);
-    const amounts = reads.flatMap((r) => r.amounts);
-    const total = totals.length ? Math.max(...totals) : amounts.length ? Math.max(...amounts) : 0;
+    const total = totals.length ? Math.max(...totals) : guessTotal(reads);
     let best = null;
     for (const r of reads) {
-      const items = r.items.filter((it) => it.amount <= total);
+      // Un « article » qui vaut tout le ticket est une ligne de total mal lue.
+      const items = r.items.filter((it) => it.amount < total || (it.amount === total && r.items.length === 1));
       const gap = Math.abs(total - items.reduce((sum, it) => sum + it.amount, 0));
       if (!best || gap < best.gap || (gap === best.gap && items.length > best.items.length)) best = { gap, items };
     }

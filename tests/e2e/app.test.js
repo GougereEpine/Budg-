@@ -329,6 +329,13 @@ test('ticket de caisse : photo lue, articles attribués, dépense préremplie', 
   await page.click('.receipt-item:nth-child(2) .seg label:has(input[value=a]) span');
   await page.click('.receipt-item:nth-child(3) .seg label:has(input[value=b]) span');
   assert.match(await text(page, '[data-receipt-sum]'), /Maxime 4,87 € · Lola 2,92 €/);
+  // Article oublié par la lecture : ajouté, les choix déjà faits restent.
+  await page.fill('#modal [name=newLabel]', 'Pain');
+  await page.fill('#modal [name=newAmount]', '1,20');
+  await page.click('[data-add-item]');
+  await page.waitForFunction(() => document.querySelectorAll('.receipt-item').length === 4);
+  assert.equal(await page.isChecked('.receipt-item:nth-child(2) input[value=a]'), true);
+  assert.equal(await page.inputValue('#modal [name=total]'), '7,79');
   // ✕ : le lait n'est pas compté, il est retiré du total.
   await page.click('.receipt-item:nth-child(1) .seg label:has(input[value=x]) span');
   assert.match(await text(page, '[data-receipt-sum]'), /Retiré 1,15 € · dépense 6,64 €.*Maxime 4,29 € · Lola 2,35 €/);
