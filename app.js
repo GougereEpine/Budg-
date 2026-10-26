@@ -731,19 +731,20 @@
   }
 
   // Articles du ticket : pour chacun, « nous deux », « rien que pour a » ou « pour b ».
-  function receiptForm(receipt, base) {
+  // `kept` : choix déjà faits et total saisi, gardés quand on ajoute un article oublié.
+  function receiptForm(receipt, base, kept = { assign: [], total: null }) {
     const items = receipt.items;
     const who = (i) => `
       <div class="seg seg-sm">
         ${[['ab', '👥'], ['a', name('a')], ['b', name('b')], ['x', '✕']]
-          .map(([v, l]) => `<label class="${v === 'x' ? 'skip' : ''}"><input type="radio" name="w${i}" value="${v}" ${v === 'ab' ? 'checked' : ''} aria-label="${v === 'x' ? 'Ne pas compter' : ''}"><span>${v === 'a' || v === 'b' ? `<i class="dot ${v}"></i>${esc(l)}` : l}</span></label>`)
+          .map(([v, l]) => `<label class="${v === 'x' ? 'skip' : ''}"><input type="radio" name="w${i}" value="${v}" ${v === (kept.assign[i] || 'ab') ? 'checked' : ''} aria-label="${v === 'x' ? 'Ne pas compter' : ''}"><span>${v === 'a' || v === 'b' ? `<i class="dot ${v}"></i>${esc(l)}` : l}</span></label>`)
           .join('')}
       </div>`;
     openModal(
       '🧾 Ticket de caisse',
       `
       <label class="field"><span>Total du ticket</span>
-        <input class="big" name="total" inputmode="decimal" value="${amountValue(receipt.total)}" placeholder="0 €" required autocomplete="off">
+        <input class="big" name="total" inputmode="decimal" value="${kept.total != null ? esc(kept.total) : amountValue(receipt.total)}" placeholder="0 €" required autocomplete="off">
       </label>
       ${
         items.length
@@ -761,6 +762,11 @@
              </div>`
           : '<p class="hint">Aucun article lu sur la photo : vérifiez le total, il sera partagé comme d\'habitude.</p>'
       }
+      <div class="receipt-add">
+        <input name="newLabel" placeholder="Article oublié" maxlength="60" autocomplete="off">
+        <input name="newAmount" inputmode="decimal" placeholder="0 €" autocomplete="off">
+        <button type="button" class="btn" data-add-item aria-label="Ajouter l'article">＋</button>
+      </div>
       <p class="hint" data-receipt-sum></p>`,
       {
         submitLabel: 'Continuer',
@@ -773,10 +779,21 @@
             if (!(total > 0)) return (out.innerHTML = '⚠️ Total invalide');
             if (ex.extraA + ex.extraB > total) return (out.innerHTML = '⚠️ Plus que le total du ticket');
             const sh = L.sharesOf({ amount: total, split: S.state.defaultSplit, ...ex });
-            out.innerHTML = `${ex.removed ? `Retiré ${euro(ex.removed)} · <b>dépense ${euro(total)}</b><br>` : ''}Partagé ${euro(total - ex.extraA - ex.extraB)}${ex.extraA ? ` · rien que ${esc(name('a'))} ${euro(ex.extraA)}` : ''}${ex.extraB ? ` · rien que ${esc(name('b'))} ${euro(ex.extraB)}` : ''}<br>Au total : ${esc(name('a'))} <b>${euro(sh.a)}</b> · ${esc(name('b'))} <b>${euro(sh.b)}</b>`;
+            // Ce que la lecture n'a pas trouvé reste partagé.
+            const unread = L.parseAmount(form.total.value) - items.reduce((sum, it) => sum + it.amount, 0);
+            out.innerHTML = `${items.length && unread > 0 ? `Articles non lus : ${euro(unread)} (partagés)<br>` : ''}${ex.removed ? `Retiré ${euro(ex.removed)} · <b>dépense ${euro(total)}</b><br>` : ''}Partagé ${euro(total - ex.extraA - ex.extraB)}${ex.extraA ? ` · rien que ${esc(name('a'))} ${euro(ex.extraA)}` : ''}${ex.extraB ? ` · rien que ${esc(name('b'))} ${euro(ex.extraB)}` : ''}<br>Au total : ${esc(name('a'))} <b>${euro(sh.a)}</b> · ${esc(name('b'))} <b>${euro(sh.b)}</b>`;
           };
           form.querySelectorAll('input').forEach((i) => i.addEventListener(i.type === 'radio' ? 'change' : 'input', sync));
           sync();
+          // Article oublié par la lecture : ajouté à la liste, les choix faits sont gardés.
+          form.querySelector('[data-add-item]').onclick = () => {
+            const amount = readAmount(form, 'newAmount');
+            if (!amount) return fail(form, "Montant de l'article invalide");
+            const label = form.newLabel.value.trim() || 'Article';
+            const kept2 = { assign: items.map((_, i) => form[`w${i}`].value).concat('ab'), total: form.total.value };
+            modal.close();
+            receiptForm({ ...receipt, items: items.concat({ label, amount }) }, base, kept2);
+          };
         },
         onSubmit: async (form) => {
           const { removed, ...ex } = L.receiptExtras(items, items.map((_, i) => form[`w${i}`].value));

@@ -1452,3 +1452,10 @@ select.guessed {
   overflow: visible;
   margin-bottom: 4px;
 }
+
+.receipt-add {
+  display: grid;
+  grid-template-columns: 1fr 90px 48px;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
