@@ -1969,6 +1969,54 @@
       .join('');
   }
 
+  // Camembert (anneau) de la répartition par catégorie : les 5 plus grosses,
+  // le reste regroupé dans « Autres ». La légende donne nom, montant et %.
+  function categoryDonut(an) {
+    const slices = an.categories.filter((c) => c.spent > 0).map((c) => ({ icon: c.icon, name: c.name, amount: c.spent }));
+    const none = an.total - slices.reduce((sum, x) => sum + x.amount, 0);
+    if (none > 0) slices.push({ icon: '❔', name: 'Sans catégorie', amount: none });
+    slices.sort((x, y) => y.amount - x.amount);
+    const top = slices.slice(0, 5);
+    const rest = slices.slice(5).reduce((sum, x) => sum + x.amount, 0);
+    if (rest > 0) top.push({ icon: '🗂️', name: 'Autres', amount: rest, other: true });
+    const total = top.reduce((sum, x) => sum + x.amount, 0);
+    if (!(total > 0)) return '';
+    const r = 40;
+    const C = 2 * Math.PI * r;
+    const gap = top.length > 1 ? 1.2 : 0; // fin espace entre les parts
+    let offset = 0;
+    const arcs = top
+      .map((x, i) => {
+        const len = (x.amount / total) * C;
+        const color = x.other ? 'var(--viz-other)' : `var(--viz-${i + 1})`;
+        const arc = `<circle class="donut-arc" r="${r}" cx="50" cy="50" stroke="${color}" stroke-dasharray="${Math.max(0.1, len - gap)} ${C}" stroke-dashoffset="${-offset}"><title>${esc(x.name)} : ${euro(x.amount)} (${Math.round((x.amount / total) * 100)} %)</title></circle>`;
+        offset += len;
+        return arc;
+      })
+      .join('');
+    const legend = top
+      .map(
+        (x, i) => `
+        <div class="donut-row">
+          <i class="dot" style="background:${x.other ? 'var(--viz-other)' : `var(--viz-${i + 1})`}"></i>
+          <span class="name">${esc(x.icon)} ${esc(x.name)}</span>
+          <b class="num">${euro(x.amount)}</b>
+          <span class="muted num pct">${Math.round((x.amount / total) * 100)} %</span>
+        </div>`
+      )
+      .join('');
+    return `
+      <h2>Répartition par catégorie</h2>
+      <div class="card donut-card">
+        <svg class="donut" viewBox="0 0 100 100" role="img" aria-label="Répartition des dépenses par catégorie">
+          <g transform="rotate(-90 50 50)">${arcs}</g>
+          <text x="50" y="48" class="donut-total">${euro(total)}</text>
+          <text x="50" y="60" class="donut-sub">ce mois-ci</text>
+        </svg>
+        <div class="donut-legend">${legend}</div>
+      </div>`;
+  }
+
   function renderBudget() {
     const p = persoOf();
     const scope = ui.scope;
@@ -2101,6 +2149,7 @@
       <div class="card">
         <div class="history">${historyHtml}</div>
       </div>
+      ${categoryDonut(an)}
 
       ${couple ? goalsSection() : ''}
 
