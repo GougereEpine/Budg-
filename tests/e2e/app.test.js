@@ -66,7 +66,8 @@ test('favoris, catégorie devinée et partie pour une seule personne', async () 
   assert.equal(favs.length, 2);
   await page.click('[data-fav]:has-text("Total")');
   assert.equal(await page.inputValue('#modal [name=amount]'), '55');
-  assert.equal(await page.inputValue('#modal [name=splitMode]'), 'car');
+  // L'option « usage de la voiture » n'est plus proposée : la répartition passe en personnalisée.
+  assert.equal(await page.inputValue('#modal [name=splitMode]'), 'custom');
   await page.click('[data-close]');
 
   await page.click('#tabs .fab');
