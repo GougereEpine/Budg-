@@ -445,12 +445,15 @@
   const RECEIPT_TOTAL = /\b(total|solde|a payer|net a payer|montant du|montant ttc|ttc|amount due|balance due|grand total)\b/;
   const RECEIPT_SUBTOTAL = /\b(sous ?total|sub ?total)\b/;
   const RECEIPT_SKIP = /\b(sous ?total|sub ?total|total|solde|a payer|cb|carte|visa|mastercard|especes|rendu|monnaie|tva|htva|ht|ttc|taux|montant|paiement|paye|regle|credit|debit|avoir|fidelite|cagnotte|ticket|merci|siret|tel|date|heure|caisse|transaction|aut|contactless|sans contact|pieces|articles|table|serv|vat|sales|rate|amt|change|cash|card|guests|chk|tbl|excl|balance)\b/;
-  // Montant en fin de ligne (1,99 / 12.50 / -0,60), suivi éventuellement du
-  // symbole € (souvent lu « e » ou « £ ») et d'un code TVA (A, B, « À »…).
+  // Montant en fin de ligne (1,99 / 12.50 / -0,60), suivi éventuellement de la
+  // devise (€, EUR, souvent mal lue : « ER », « EIR », « e », « £ ») puis de petits
+  // restes de lecture (code TVA « A », « À », points, virgules…).
   // Les chiffres mal lus en lettres (B pour 8, O pour 0…) sont corrigés.
-  const RECEIPT_AMOUNT = /(?:^|\s)[€£$Ç]?(-?\s?[\dBOoSIl]{1,4}[,.]\s?\d{2})(?:\s*(?:€|eur|euros?|e|£|c))?(?:\s*[^\s\d]{1,2})?\s*$/i;
+  const RECEIPT_AMOUNT = /(?:^|\s)[€£$Ç]?(-?\s?[\dBOoSIl]{1,4}[,.]\s?\d{2})[.,]?(?:\s*(?:€|eur|euros?|eir|fur|er|ur|e|£|c)\b)?(?:\s*[^\s\d]{1,3})*\s*$/i;
   const OCR_DIGITS = { B: '8', O: '0', o: '0', S: '5', I: '1', l: '1' };
-  function parseReceipt(text) {
+  const toCents = (s) => Math.round(parseFloat(s.replace(/\s/g, '').replace(/[BOoSIl]/g, (c) => OCR_DIGITS[c]).replace(',', '.')) * 100);
+
+  function parseReceiptText(text) {
     const items = [];
     const totals = [];
     const amounts = [];
@@ -459,13 +462,15 @@
       const line = raw.replace(/\s+/g, ' ').trim();
       const m = line.match(RECEIPT_AMOUNT);
       if (!m) continue;
-      const digits = m[1].replace(/\s/g, '').replace(/[BOoSIl]/g, (c) => OCR_DIGITS[c]);
-      const amount = Math.round(parseFloat(digits.replace(',', '.')) * 100);
+      const amount = toCents(m[1]);
       if (!Number.isFinite(amount) || amount === 0) continue;
-      const before = line.slice(0, m.index).replace(/\b\d+\s*[x*]\s*\d+[,.]\d{2}\b/gi, ' '); // « 2 x 1,50 »
+      let before = line.slice(0, m.index).replace(/\b\d+\s*[x*]\s*\d+[,.]\d{2}\b/gi, ' '); // « 2 x 1,50 »
+      // Un seul autre montant sur la ligne : le prix unitaire (« 3 X EPINARDS 3.15 EUR 9.45 EUR ») ;
+      // plusieurs : ligne de tableau (TVA…).
+      const others = before.match(/\d[,.]\d{2}/g) || [];
+      const table = others.length >= 2;
+      if (others.length === 1) before = before.replace(/[\dBO]{1,4}[,.]\d{2}\s*(?:€|eur|euros?|eir|er|e)?/i, ' ');
       const key = normalizeLabel(before);
-      // Ligne de tableau (TVA…) : plusieurs montants sur la même ligne.
-      const table = (before.match(/\d[,.]\d{2}/g) || []).length >= 1;
       if (RECEIPT_TOTAL.test(key) && !RECEIPT_SUBTOTAL.test(key)) {
         if (amount > 0) totals.push(amount);
         afterTotal = true;
@@ -473,15 +478,33 @@
       }
       if (amount > 0 && !table) amounts.push(amount);
       if (afterTotal || table || RECEIPT_SKIP.test(key) || !/[a-z]{3}/.test(key)) continue;
-      // Début de ligne : bruit de lecture (« a. », « m5 »…) puis quantité éventuelle.
+      // Début de ligne : bruit de lecture (« a. », « m5 », colonne « T »…) puis quantité éventuelle.
       const words = before.replace(/[€*|]+/g, ' ').trim().split(/\s+/);
       const first = words.findIndex((w) => /[a-z]{3}/i.test(normalizeLabel(w)));
-      const qty = first > 0 && /^\d{1,2}$/.test(words[first - 1]) ? Number(words[first - 1]) : 1;
+      const q = before.match(/(?:^|[\sA-Za-z])(\d{1,2})[\s.]?[x×%*](?:\s|$)/i);
+      const qty = q ? Number(q[1]) : first > 0 && /^\d{1,2}$/.test(words[first - 1]) ? Number(words[first - 1]) : 1;
       const label = words.slice(Math.max(0, first)).join(' ');
       items.push({ label: qty > 1 ? `${qty} × ${label}` : label, amount });
     }
+    return { totals, amounts, items };
+  }
+
+  // `text` : le texte lu, ou plusieurs lectures de la même photo (réglages
+  // différents). Le total vient d'une ligne TOTAL / SOLDE / À PAYER si une
+  // lecture en trouve une (sinon le plus grand montant) ; les articles, de la
+  // lecture dont la somme tombe le plus près de ce total.
+  function parseReceipt(text) {
+    const reads = (Array.isArray(text) ? text : [text]).map(parseReceiptText);
+    const totals = reads.flatMap((r) => r.totals);
+    const amounts = reads.flatMap((r) => r.amounts);
     const total = totals.length ? Math.max(...totals) : amounts.length ? Math.max(...amounts) : 0;
-    return { total, items: items.filter((it) => it.amount <= total) };
+    let best = null;
+    for (const r of reads) {
+      const items = r.items.filter((it) => it.amount <= total);
+      const gap = Math.abs(total - items.reduce((sum, it) => sum + it.amount, 0));
+      if (!best || gap < best.gap || (gap === best.gap && items.length > best.items.length)) best = { gap, items };
+    }
+    return { total, items: best ? best.items : [] };
   }
 
   // Répartition d'un ticket : chaque article est pour les deux ('ab'), pour 'a',

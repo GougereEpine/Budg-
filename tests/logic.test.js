@@ -571,3 +571,17 @@ test('budget perso sur une catégorie du couple (même nom) : ses dépenses pers
   const tot = L.analyzeMonth(L.totalState(s, 'a', '2026-10'), '2026-10', '2026-10-26');
   assert.equal(tot.categories.find((c) => c.id === 'p-resto').spent, 5500);
 });
+
+test('ticket de caisse : deux lectures de vraies photos (froissé, restaurant)', () => {
+  // Textes tels que lus par Tesseract avec deux réglages de mise en page.
+  const read = (f) => Object.values(require(`./fixtures/${f}`));
+  const carrefour = L.parseReceipt(read('ticket-carrefour.json'));
+  assert.equal(carrefour.total, 6431);
+  const sum = carrefour.items.reduce((s, i) => s + i.amount, 0);
+  assert.ok(carrefour.items.length >= 12 && sum >= 5500 && sum <= 6431, `${carrefour.items.length} articles, ${sum}`);
+  assert.ok(carrefour.items.some((i) => i.label === 'COURGETTE' && i.amount === 94));
+  assert.ok(carrefour.items.some((i) => /2 × .*SAUMON/.test(i.label) && i.amount === 1200)); // prix unitaire ignoré
+  const cabanon = L.parseReceipt(read('ticket-cabanon.json'));
+  assert.equal(cabanon.total, 11100);
+  assert.equal(cabanon.items.reduce((s, i) => s + i.amount, 0), 11100);
+});

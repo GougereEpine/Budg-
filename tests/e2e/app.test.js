@@ -317,6 +317,7 @@ test('ticket de caisse : photo lue, articles attribués, dépense préremplie', 
       contentType: 'text/javascript',
       body: `window.Tesseract = { createWorker: async () => ({
         recognize: async () => ({ data: { text: 'LAIT 1,15\\nSHAMPOING 4,29\\nDESSERT 2,35\\nTOTAL 7,79\\nCB 7,79' } }),
+        setParameters: async () => {},
         terminate: async () => {},
       }) };`,
     })
