@@ -478,8 +478,12 @@
       ${
         existing || preset.amount
           ? ''
-          : `<div data-couple-only><button type="button" class="btn block scan-btn" data-scan>📷 Scanner un ticket de caisse</button>
-             <input type="file" accept="image/*" capture="environment" data-scan-file hidden>
+          : `<div data-couple-only><div class="row scan-btns">
+               <button type="button" class="btn" data-scan="camera">📷 Photo du ticket</button>
+               <button type="button" class="btn" data-scan="gallery">🖼️ Galerie</button>
+             </div>
+             <input type="file" accept="image/*" capture="environment" data-scan-file="camera" hidden>
+             <input type="file" accept="image/*" data-scan-file="gallery" hidden>
              <p class="hint" data-scan-status hidden></p></div>`
       }
       ${
@@ -602,14 +606,13 @@
               };
             });
             // Ticket de caisse : photo → lecture sur le téléphone → choix article par article.
-            const scanBtn = form.querySelector('[data-scan]');
-            if (scanBtn) {
-              const file = form.querySelector('[data-scan-file]');
-              const status = form.querySelector('[data-scan-status]');
-              scanBtn.onclick = () => file.click();
+            const scanBtns = form.querySelectorAll('[data-scan]');
+            const status = form.querySelector('[data-scan-status]');
+            scanBtns.forEach((b) => (b.onclick = () => form.querySelector(`[data-scan-file="${b.dataset.scan}"]`).click()));
+            form.querySelectorAll('[data-scan-file]').forEach((file) => {
               file.onchange = async () => {
                 if (!file.files[0]) return;
-                scanBtn.disabled = true;
+                scanBtns.forEach((b) => (b.disabled = true));
                 status.hidden = false;
                 status.textContent = 'Lecture du ticket…';
                 try {
@@ -618,10 +621,10 @@
                 } catch (err) {
                   console.error(err);
                   status.textContent = '⚠️ Lecture impossible : ' + errorMessage(err);
-                  scanBtn.disabled = false;
+                  scanBtns.forEach((b) => (b.disabled = false));
                 }
               };
-            }
+            });
             if (!preset.amount) form.amount.focus();
           }
         },

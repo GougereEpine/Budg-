@@ -309,7 +309,7 @@ test('ticket de caisse : photo lue, articles attribués, dépense préremplie', 
     })
   );
   await page.click('#tabs .fab');
-  await page.setInputFiles('[data-scan-file]', { name: 'ticket.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
+  await page.setInputFiles('[data-scan-file=gallery]', { name: 'ticket.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
   await page.waitForSelector('.receipt-item');
   assert.equal(await page.inputValue('#modal [name=total]'), '7,79');
   await page.click('.receipt-item:nth-child(2) .seg label:has(input[value=a]) span');

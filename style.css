@@ -1325,8 +1325,13 @@ select.guessed {
 }
 
 /* ---------- Ticket de caisse ---------- */
-.scan-btn {
+.scan-btns {
   margin-bottom: 14px;
+}
+
+.scan-btns .btn {
+  flex: 1;
+  padding: 12px 8px;
 }
 
 .receipt-items {
