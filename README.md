@@ -58,6 +58,8 @@ C'est un site statique, sans compilation :
 ```bash
 npm start        # sert le dossier sur http://localhost:8080
 npm test         # tests du calcul (solde, charges fixes, analyse)
+npm install && npx playwright install chromium
+npm run test:ui  # tests de l'interface dans Chromium (parcours principaux, hors ligne)
 ```
 
 Pour l'utiliser à deux, publiez le dossier sur un hébergeur statique (Netlify, Vercel,
