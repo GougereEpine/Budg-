@@ -625,7 +625,6 @@
                 }
               };
             });
-            if (!preset.amount) form.amount.focus();
           }
         },
         onSubmit: async (form) => {
