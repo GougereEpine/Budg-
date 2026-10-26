@@ -21,6 +21,7 @@
     hideFixed: readPref('budg-hide-fixed') === '1',
     // Accueil : charges fixes masquées par défaut (réglage séparé).
     hideFixedHome: readPref('budg-hide-fixed-home') !== '0',
+    persoOf: null, // espace perso affiché ('a' ou 'b'), par défaut le sien
   };
 
   // Préférences propres à cet appareil (le stockage peut être indisponible).
@@ -101,8 +102,9 @@
     return S.state.categories.find((c) => c.id === id) || { id: null, name: 'Sans catégorie', icon: '❔', budget: 0 };
   }
 
-  function sortedCategories() {
-    return [...S.state.categories].sort((x, y) => x.position - y.position);
+  // Catégories du couple (`owner` null) ou catégories perso d'une personne.
+  function sortedCategories(owner = null) {
+    return S.state.categories.filter((c) => (c.owner || null) === owner).sort((x, y) => x.position - y.position);
   }
 
   function splitText(split, byUsage, shareA, amount) {
@@ -241,15 +243,54 @@
       </label>`;
   }
 
-  function categoryField(selected) {
+  // Options du choix de catégorie : celles du couple, ou (perso) ses catégories
+  // perso puis celles du couple.
+  function categoryOptions(selected, owner = null) {
+    const opts = (list) =>
+      list.map((c) => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('');
+    if (!owner) return opts(sortedCategories());
+    const mine = sortedCategories(owner);
+    return mine.length
+      ? `<optgroup label="Mes catégories">${opts(mine)}</optgroup><optgroup label="Catégories du couple">${opts(sortedCategories())}</optgroup>`
+      : opts(sortedCategories());
+  }
+
+  function categoryField(selected, owner = null) {
     return `
       <label class="field"><span>Catégorie</span>
-        <select name="categoryId">
-          ${sortedCategories()
-            .map((c) => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`)
-            .join('')}
-        </select>
+        <select name="categoryId">${categoryOptions(selected, owner)}</select>
       </label>`;
+  }
+
+  // Choix « pour le couple » ou « perso » en tête des formulaires.
+  function scopeField(owner) {
+    return `
+      <div class="seg" style="margin-bottom:14px">
+        <label><input type="radio" name="scope" value="couple" ${owner ? '' : 'checked'}><span>👥 Couple</span></label>
+        <label><input type="radio" name="scope" value="perso" ${owner ? 'checked' : ''}><span>👤 Perso</span></label>
+      </div>
+      <p class="hint" data-perso-hint ${owner ? '' : 'hidden'}>Rien que pour vous : hors du solde et des budgets du couple, sans notification. Visible dans l'onglet Perso.</p>`;
+  }
+
+  // Bascule couple / perso : masque la répartition et change les catégories proposées.
+  function bindScopeField(form, onChange) {
+    const sync = () => {
+      const perso = form.scope.value === 'perso';
+      form.querySelector('[data-perso-hint]').hidden = !perso;
+      form.querySelectorAll('[data-couple-only]').forEach((el) => (el.hidden = perso));
+      const current = form.categoryId.value;
+      form.categoryId.innerHTML = categoryOptions(current, perso ? form.payer.value : null);
+      if (!form.categoryId.value) form.categoryId.selectedIndex = 0;
+      if (onChange) onChange(perso);
+    };
+    form.querySelectorAll('[name=scope]').forEach((i) => (i.onchange = sync));
+    form.querySelectorAll('[name=payer]').forEach((i) => i.addEventListener('change', () => form.scope.value === 'perso' && sync()));
+    sync();
+  }
+
+  // Une dépense ou un abonnement perso est entièrement à la charge de son propriétaire.
+  function personalFields(owner) {
+    return { owner, split: owner === 'a' ? 100 : 0, shareA: null, byUsage: false, extraA: 0, extraB: 0 };
   }
 
   function usageHint(month) {
@@ -419,8 +460,9 @@
       date: today(),
       label: preset.label || '',
       amount: 0,
-      payer: me(),
-      categoryId: preset.categoryId || (sortedCategories()[0] || {}).id || null,
+      payer: preset.owner || me(),
+      owner: preset.owner || null,
+      categoryId: preset.categoryId || (sortedCategories(preset.owner || null)[0] || sortedCategories()[0] || {}).id || null,
       split: S.state.defaultSplit,
     };
     const titles = existing
@@ -437,6 +479,7 @@
               .join('')}</div>`
           : ''
       }
+      ${scopeField(e.owner)}
       <div class="seg" style="margin-bottom:14px">
         <label><input type="radio" name="kind" value="expense" ${e.isIncome ? '' : 'checked'}><span>💳 Dépense</span></label>
         <label><input type="radio" name="kind" value="income" ${e.isIncome ? 'checked' : ''}><span>💰 Entrée d'argent</span></label>
@@ -451,8 +494,9 @@
       ${payerField(e.payer)}
       <div class="row">
         <label class="field"><span>Date</span><input type="date" name="date" value="${e.date}" required></label>
-        ${categoryField(e.categoryId)}
+        ${categoryField(e.categoryId, e.owner)}
       </div>
+      <div data-couple-only>
       ${splitField(e, L.monthKey(e.date))}
       <details class="extras" ${e.extraA || e.extraB ? 'open' : ''}>
         <summary>🧴 Une partie pour une seule personne <span class="muted">(shampoing, dessert…)</span></summary>
@@ -463,7 +507,8 @@
             <input name="extraB" inputmode="decimal" placeholder="0 €" value="${amountValue(e.extraB)}" autocomplete="off"></label>
         </div>
         <p class="hint" data-extras-preview>Le reste est partagé selon la répartition ci-dessus.</p>
-      </details>`,
+      </details>
+      </div>`,
       {
         onOpen: (form) => {
           const month = () => L.monthKey(form.date.value || today());
@@ -471,16 +516,22 @@
           form.date.onchange = sync;
           // Dépense ou entrée d'argent : seuls les libellés changent.
           const payerLabel = form.querySelector('[name=payer]').closest('label.field').querySelector('span');
+          const isPerso = () => form.scope.value === 'perso';
           const syncKind = () => {
             const income = form.kind.value === 'income';
             form.querySelector('.modal-head h2').textContent = titles[income ? 1 : 0];
-            form.querySelector('[data-income-hint]').hidden = !income;
+            form.querySelector('[data-income-hint]').hidden = !income || isPerso();
             form.querySelector('[data-amount-label]').textContent = income ? 'Montant reçu' : 'Montant';
-            payerLabel.textContent = income ? 'Reçu par' : 'Payé par';
+            payerLabel.textContent = isPerso() ? (income ? 'Pour' : 'Dépense de') : income ? 'Reçu par' : 'Payé par';
             form.label.placeholder = income ? 'Remboursement EDF…' : 'Courses Carrefour, resto…';
           };
           form.querySelectorAll('[name=kind]').forEach((i) => (i.onchange = syncKind));
-          syncKind();
+          // Les favoris sont ceux du couple : masqués en perso.
+          bindScopeField(form, (perso) => {
+            const favEl = form.querySelector('.fav-chips');
+            if (favEl) favEl.hidden = perso;
+            syncKind();
+          });
           // Nouvelle dépense : on reprend la répartition de la dernière dépense de la catégorie
           // (ex. « Transport » toujours selon l'usage de la voiture).
           if (!existing) {
@@ -502,7 +553,8 @@
               sync();
             };
             const categoryChanged = () => {
-              const last = [...S.state.expenses]
+              if (isPerso()) return;
+              const last = L.shared(S.state.expenses)
                 .filter((x) => x.categoryId === form.categoryId.value && !x.isIncome)
                 .sort((x, y) => (x.date < y.date ? 1 : -1))[0];
               if (last) applySplit(last);
@@ -516,7 +568,7 @@
             // Catégorie devinée d'après le libellé (« Lidl » → Courses).
             form.label.addEventListener('input', () => {
               if (categoryTouched) return;
-              const guess = L.guessCategory(S.state, form.label.value);
+              const guess = L.guessCategory(isPerso() ? L.personalState(S.state, form.payer.value) : S.state, form.label.value);
               if (guess && guess !== form.categoryId.value) {
                 form.categoryId.value = guess;
                 form.categoryId.classList.add('guessed');
@@ -545,11 +597,13 @@
         onSubmit: async (form) => {
           const amount = readAmount(form);
           if (!amount) return fail(form, 'Montant invalide');
-          const splitting = readSplitting(form, amount, L.monthKey(form.date.value));
+          const perso = form.scope.value === 'perso';
+          const splitting = perso ? personalFields(form.payer.value) : readSplitting(form, amount, L.monthKey(form.date.value));
           if (!splitting) return false;
           await S.save('expenses', {
             ...e,
             ...splitting,
+            owner: perso ? form.payer.value : null,
             isIncome: form.kind.value === 'income',
             amount,
             label: form.label.value.trim(),
@@ -565,14 +619,15 @@
     );
   }
 
-  function recurringForm(existing) {
-    const logement = S.state.categories.find((c) => c.name === 'Logement');
+  function recurringForm(existing, preset = {}) {
+    const logement = sortedCategories().find((c) => c.name === 'Logement');
     const r = existing || {
       id: S.newId(),
       label: '',
       amount: 0,
-      payer: me(),
-      categoryId: (logement || sortedCategories()[0] || {}).id || null,
+      payer: preset.owner || me(),
+      owner: preset.owner || null,
+      categoryId: ((preset.owner && sortedCategories(preset.owner)[0]) || logement || sortedCategories()[0] || {}).id || null,
       split: S.state.defaultSplit,
       day: 1,
       startMonth: currentMonth(),
@@ -581,6 +636,7 @@
     openModal(
       existing ? 'Modifier la charge fixe' : 'Nouvelle charge fixe',
       `
+      ${scopeField(r.owner)}
       <p class="hint" style="margin-top:0">Loyer, assurance, Netflix, électricité… : c'est compté automatiquement chaque mois.</p>
       <label class="field"><span>Montant mensuel</span>
         <input class="big" name="amount" inputmode="decimal" placeholder="0 €" value="${amountValue(r.amount)}" required autocomplete="off">
@@ -589,8 +645,8 @@
         <input name="label" placeholder="Loyer, Netflix, assurance habitation…" value="${esc(r.label)}" maxlength="80" required>
       </label>
       ${payerField(r.payer, 'payer', 'Prélevé sur le compte de')}
-      ${categoryField(r.categoryId)}
-      ${splitField(r, currentMonth())}
+      ${categoryField(r.categoryId, r.owner)}
+      <div data-couple-only>${splitField(r, currentMonth())}</div>
       <div class="row">
         <label class="field"><span>Jour du prélèvement</span>
           <input type="number" name="day" min="1" max="31" value="${r.day}" required></label>
@@ -600,19 +656,24 @@
       <label class="field"><span>Jusqu'à (vide = toujours en cours)</span>
         <input type="month" name="endMonth" value="${r.endMonth || ''}"></label>`,
       {
-        onOpen: (form) => bindSplitField(form, currentMonth),
+        onOpen: (form) => {
+          bindSplitField(form, currentMonth);
+          bindScopeField(form);
+        },
         onSubmit: async (form) => {
           const amount = readAmount(form);
           if (!amount) return fail(form, 'Montant invalide');
+          const perso = form.scope.value === 'perso';
           const startMonth = form.startMonth.value;
           const endMonth = form.endMonth.value || null;
           if (!/^\d{4}-\d{2}$/.test(startMonth)) return fail(form, 'Mois de début invalide');
           if (endMonth && endMonth < startMonth) return fail(form, 'La fin doit être après le début');
-          const splitting = readSplitting(form, amount, currentMonth());
+          const splitting = perso ? personalFields(form.payer.value) : readSplitting(form, amount, currentMonth());
           if (!splitting) return false;
           await S.save('recurring', {
             ...r,
             ...splitting,
+            owner: perso ? form.payer.value : null,
             amount,
             label: form.label.value.trim(),
             payer: form.payer.value,
@@ -1045,18 +1106,19 @@
     return parts.length ? ` · 🧴 ${parts.join(', ')}` : '';
   }
 
-  function expenseItem(e) {
+  // `readOnly` : ligne non cliquable (dépenses perso de l'autre).
+  function expenseItem(e, readOnly = false) {
     const c = category(e.categoryId);
+    const how = e.personal ? '👤 perso' : `${splitText(e.split, e.byUsage, e.shareA == null ? e.shareA : Math.abs(e.shareA), Math.abs(e.amount))}${extrasText(e)}`;
     const tag = e.recurringId ? '🔁 ' : e.isIncome ? '💰 ' : '';
     // Les entrées d'argent arrivent en négatif depuis les calculs : on affiche des valeurs positives.
     const amount = Math.abs(e.amount);
-    const shareA = e.shareA == null ? e.shareA : Math.abs(e.shareA);
     return `
-      <div class="item" data-expense="${e.id}">
+      <div class="item" ${readOnly ? '' : `data-expense="${e.id}"`}>
         <div class="emoji">${esc(c.icon)}</div>
         <div class="body">
           <div class="title">${tag}${esc(e.label)}</div>
-          <div class="sub">${esc(c.name)} · ${splitText(e.split, e.byUsage, shareA, amount)}${extrasText(e)}</div>
+          <div class="sub">${esc(c.name)} · ${how}</div>
         </div>
         <div class="right">
           <div class="amt num ${e.isIncome ? 'income' : ''}">${e.isIncome ? '+' : ''}${euro(amount)}</div>
@@ -1381,7 +1443,8 @@
         ? '<span class="muted">Premier mois</span>'
         : `<span class="${vsAvg > 0 ? 'up' : 'down'}">${vsAvg > 0 ? '+' : ''}${vsAvg} % vs moyenne</span>`;
 
-    const recent = [...state.expenses]
+    const shared = L.shared(state.expenses);
+    const recent = [...shared]
       .sort((x, y) => (x.date === y.date ? 0 : x.date < y.date ? 1 : -1))
       .slice(0, 3);
 
@@ -1393,6 +1456,7 @@
       ${invite}
       ${balanceHtml}
       ${shoppingCard()}
+      ${persoCard(cur)}
       ${carReminder(cur)}
       ${alertsHtml ? `<h2>Alertes de ${monthLabel(cur, true)}</h2>${alertsHtml}` : ''}
       ${notifSuggestion()}
@@ -1408,7 +1472,7 @@
         ${whoPaidHtml(cur, ui.hideFixedHome)}
       </div>
       <div class="topbar"><h2>Dernières dépenses</h2>
-        ${state.expenses.length > 3 ? '<button class="btn link" data-goto="expenses">Tout voir ›</button>' : ''}</div>
+        ${shared.length > 3 ? '<button class="btn link" data-goto="expenses">Tout voir ›</button>' : ''}</div>
       <div class="card list">
         ${recent.length ? recent.map(expenseItem).join('') : '<div class="empty">Aucune dépense pour l\'instant.<br>Appuyez sur ＋ pour commencer.</div>'}
       </div>`;
@@ -1611,7 +1675,7 @@
     const cur = currentMonth();
     const rs = L.recurringSummary(state, cur);
     const activeIds = new Set(rs.active.map((r) => r.id));
-    const list = [...state.recurring].sort((x, y) => y.amount - x.amount);
+    const list = L.shared(state.recurring).sort((x, y) => y.amount - x.amount);
     const active = list.filter((r) => activeIds.has(r.id));
     const inactive = list.filter((r) => !activeIds.has(r.id));
 
@@ -2078,6 +2142,144 @@
 
   // ---------- Liste de courses ----------
 
+  // ---------- Espace perso ----------
+
+  function persoOf() {
+    return ui.persoOf || me();
+  }
+
+  // Carte d'accès à l'espace perso, sur l'accueil.
+  function persoCard(month) {
+    const t = L.personalTotal(S.state, me(), month);
+    const sub = t.perso
+      ? `${euro(t.perso)} ce mois-ci · ${euro(t.total)} avec le couple`
+      : 'Tes dépenses à toi, hors du couple';
+    return `
+      <div class="card item shop-link" data-goto="perso" role="button">
+        <div class="emoji">👤</div>
+        <div class="body"><div class="title">Mon perso</div><div class="sub">${sub}</div></div>
+        <span class="chev" aria-hidden="true">›</span>
+      </div>`;
+  }
+
+  function persoCategoryForm(existing, owner) {
+    const c = existing || { id: S.newId(), name: '', icon: '🏷️', budget: 0, period: 'month', owner };
+    openModal(
+      existing ? `${c.icon} ${c.name}` : 'Nouveau budget perso',
+      `
+      <div class="row">
+        <label class="field" style="flex:0 0 70px"><span>Icône</span><input name="icon" value="${esc(c.icon)}" maxlength="8" required></label>
+        <label class="field"><span>Nom</span><input name="name" value="${esc(c.name)}" placeholder="Sport, vêtements, sorties…" maxlength="30" required></label>
+      </div>
+      <div class="seg" style="margin-bottom:12px">
+        <label><input type="radio" name="period" value="month" ${c.period === 'year' ? '' : 'checked'}><span>Par mois</span></label>
+        <label><input type="radio" name="period" value="year" ${c.period === 'year' ? 'checked' : ''}><span>Par an</span></label>
+      </div>
+      <label class="field"><span>Budget (0 = pas de budget)</span>
+        <input class="big" name="amount" inputmode="decimal" placeholder="0 €" value="${amountValue(c.budget)}" autocomplete="off">
+      </label>`,
+      {
+        onSubmit: async (form) => {
+          const v = form.amount.value.trim();
+          const budget = v === '' ? 0 : L.parseAmount(v);
+          if (!Number.isFinite(budget)) return fail(form, 'Montant invalide');
+          const position = existing ? c.position : Math.max(-1, ...S.state.categories.map((x) => x.position)) + 1;
+          await S.save('categories', { ...c, name: form.name.value.trim(), icon: form.icon.value.trim(), budget, period: form.period.value, position });
+          toast(existing ? 'Budget perso modifié' : 'Budget perso ajouté');
+        },
+        onDelete: existing ? () => S.remove('categories', c.id) : null,
+      }
+    );
+  }
+
+  function renderPerso() {
+    const p = persoOf();
+    // Hors ligne, un seul appareil pour deux : chacun peut modifier son perso.
+    const mine = S.mode !== 'cloud' || p === me();
+    const ps = L.personalState(S.state, p);
+    const an = L.analyzeMonth(ps, ui.month, today());
+    const t = L.personalTotal(S.state, p, ui.month);
+    const cur = currentMonth();
+    const subs = ps.recurring.filter((r) => r.startMonth <= cur && (!r.endMonth || r.endMonth >= cur)).sort((x, y) => y.amount - x.amount);
+    const budgets = an.categories.filter((c) => c.personal);
+
+    const budgetRow = (c) => {
+      const spent = c.annual ? c.ytd : c.spent;
+      const pct = c.budget ? Math.min(100, (spent / c.budget) * 100) : 0;
+      const detail = !c.budget
+        ? 'pas de budget'
+        : spent > c.budget
+          ? `<b style="color:var(--over)">${euro(spent - c.budget)} hors budget</b>`
+          : `reste ${euro(c.budget - spent)}${c.annual ? " pour l'année" : ''}`;
+      return `
+        <div class="budget-row level-${c.level}" ${mine ? `data-perso-cat="${c.id}"` : ''}>
+          <div class="budget-head">
+            <span class="name">${esc(c.icon)} ${esc(c.name)}</span>
+            <span class="num">${euro(spent)}${c.budget ? ` <span class="muted small">/ ${euro(c.budget)}${c.annual ? '/an' : ''}</span> <span class="pill ${pctClass(c.level)}">${c.pct} %</span>` : ''}</span>
+          </div>
+          ${c.budget ? `<div class="bar"><div class="fill" style="width:${pct}%"></div></div>` : ''}
+          <div class="small muted">${detail}</div>
+        </div>`;
+    };
+
+    const subItem = (r) => `
+      <div class="item" ${mine ? `data-recurring="${r.id}"` : ''}>
+        <div class="emoji">${esc(category(r.categoryId).icon)}</div>
+        <div class="body"><div class="title">${esc(r.label)}</div><div class="sub">${esc(category(r.categoryId).name)} · le ${r.day} du mois</div></div>
+        <div class="right"><div class="amt num">${euro(r.amount)}<span class="small muted">/mois</span></div></div>
+      </div>`;
+
+    const add = (attr, label) => (mine ? `<button class="icon-btn" ${attr} aria-label="${label}">＋</button>` : '');
+    view.innerHTML = `
+      <div class="topbar">
+        <button class="icon-btn" data-goto="home" aria-label="Retour à l'accueil">‹</button>
+        <h1 style="flex:1">Perso</h1>
+      </div>
+      <div class="chips">
+        ${['a', 'b'].map((x) => `<button class="chip ${x === p ? 'active' : ''}" data-perso-of="${x}">${S.mode === 'cloud' && x === me() ? '👤 Moi' : esc(name(x))}</button>`).join('')}
+      </div>
+      ${monthNav()}
+      <div class="card">
+        <div class="small muted">Ce que ${p === me() && S.mode === 'cloud' ? 'tu dépenses' : `${esc(name(p))} dépense`} vraiment en ${esc(monthLabel(ui.month))}</div>
+        <div style="font-size:1.8rem;font-weight:700" class="num">${euro(t.total)}</div>
+        <div class="share-cols">
+          <div><span class="small muted">👥 Part du couple</span><b class="num">${euro(t.couple)}</b></div>
+          <div><span class="small muted">👤 Perso</span><b class="num">${euro(t.perso)}</b></div>
+        </div>
+      </div>
+      ${an.alerts.map(alertHtml).join('')}
+      <div class="topbar"><h2>Budgets perso</h2>${add('data-add-perso-cat', 'Ajouter un budget perso')}</div>
+      <div class="card">
+        ${budgets.length ? budgets.map(budgetRow).join('') : `<div class="empty">${mine ? 'Sport, vêtements, sorties… : fixez-vous un budget, une alerte prévient en cas de dépassement.' : 'Aucun budget perso.'}</div>`}
+      </div>
+      <div class="topbar"><h2>Abonnements perso</h2>${add('data-add-perso-sub', 'Ajouter un abonnement perso')}</div>
+      <div class="card list">
+        ${subs.length ? subs.map(subItem).join('') : `<div class="empty">${mine ? 'Téléphone, salle de sport, streaming…' : 'Aucun abonnement perso.'}</div>`}
+      </div>
+      <div class="topbar"><h2>Dépenses du mois · ${euro(an.total)}</h2>${add('data-add-perso-exp', 'Ajouter une dépense perso')}</div>
+      <div class="card list">
+        ${an.expenses.length ? an.expenses.map((e) => expenseItem(e, !mine)).join('') : '<div class="empty">Rien ce mois-ci.</div>'}
+      </div>
+      <p class="hint" style="text-align:center">${mine ? `Hors du solde et des budgets du couple, sans notification. ${esc(name(other(p)))} peut les consulter ici.` : 'Consultation seule.'}</p>`;
+
+    view.querySelectorAll('[data-perso-of]').forEach((b) => {
+      b.onclick = () => {
+        ui.persoOf = b.dataset.persoOf;
+        render();
+      };
+    });
+    if (!mine) return;
+    view.querySelector('[data-add-perso-cat]').onclick = () => persoCategoryForm(null, p);
+    view.querySelector('[data-add-perso-sub]').onclick = () => recurringForm(null, { owner: p });
+    view.querySelector('[data-add-perso-exp]').onclick = () => expenseForm(null, { owner: p });
+    view.querySelectorAll('[data-perso-cat]').forEach((el) => {
+      el.onclick = () => {
+        const c = S.state.categories.find((x) => x.id === el.dataset.persoCat);
+        if (c) persoCategoryForm(c, p);
+      };
+    });
+  }
+
   // Carte d'accès à la liste de courses, sur l'accueil.
   function shoppingCard() {
     const todo = S.state.shopping.filter((i) => !i.done).sort((x, y) => x.position - y.position);
@@ -2155,7 +2357,7 @@
     const checkout = view.querySelector('[data-shop-checkout]');
     if (checkout) {
       checkout.onclick = () => {
-        const courses = S.state.categories.find((c) => c.name === 'Courses');
+        const courses = sortedCategories().find((c) => c.name === 'Courses');
         expenseForm(null, { label: 'Courses', categoryId: courses && courses.id, onSaved: () => run(clearDone()) });
       };
     }
@@ -2167,6 +2369,7 @@
     home: renderHome,
     expenses: renderExpenses,
     shopping: renderShopping,
+    perso: renderPerso,
     fixed: renderFixed,
     budget: renderBudget,
     settings: renderSettings,
@@ -2179,7 +2382,7 @@
     if (ui.tab === 'settings' && focused && view.contains(focused) && focused.matches('input')) return;
     tabs.hidden = false;
     // La liste et les réglages s'ouvrent depuis l'accueil : c'est lui qui reste surligné.
-    const navTab = ui.tab === 'shopping' || ui.tab === 'settings' ? 'home' : ui.tab;
+    const navTab = ['shopping', 'settings', 'perso'].includes(ui.tab) ? 'home' : ui.tab;
     tabs.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === navTab));
     // Une synchro ne doit pas faire perdre ce qu'on est en train de taper.
     const keep = focused && view.contains(focused) && focused.name && focused.matches('input')
@@ -2237,7 +2440,8 @@
     const b = ev.target.closest('[data-tab]');
     if (!b) return;
     if (b.dataset.tab === 'add') {
-      expenseForm(null);
+      // Depuis son espace perso, le ＋ ajoute une dépense perso.
+      expenseForm(null, ui.tab === 'perso' && (S.mode !== 'cloud' || persoOf() === me()) ? { owner: persoOf() } : {});
       return;
     }
     ui.tab = b.dataset.tab;

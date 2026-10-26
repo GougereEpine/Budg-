@@ -403,3 +403,40 @@ test('projet d\'épargne : progression et versement mensuel nécessaire', () => 
   assert.equal(p.perMonth, Math.ceil(230000 / 6));
   assert.equal(L.goalProgress(s, { id: 'x', target: 1000 }, '2026-10-26').perMonth, null);
 });
+
+test('espace perso : hors du couple, avec ses propres budgets et la vue totale', () => {
+  const s = baseState({
+    categories: [
+      ...baseState().categories,
+      { id: 'sport', name: 'Sport', icon: '🏋️', budget: 5000, position: 0, owner: 'a' },
+    ],
+    expenses: [
+      { id: '1', date: '2026-10-05', label: 'Courses', amount: 10000, payer: 'a', categoryId: 'courses', split: 50 },
+      { id: '2', date: '2026-10-06', label: 'Basic Fit', amount: 6000, payer: 'a', categoryId: 'sport', split: 50, owner: 'a' },
+      { id: '3', date: '2026-10-07', label: 'Ciné', amount: 1200, payer: 'b', categoryId: 'loisirs', split: 50, owner: 'b' },
+    ],
+    recurring: [
+      { id: 'r', label: 'Forfait mobile', amount: 1500, payer: 'a', categoryId: null, split: 50, day: 3, startMonth: '2026-01', endMonth: null, owner: 'a' },
+    ],
+  });
+  // Le couple ne voit rien du perso : solde, mois, charges fixes, catégories.
+  assert.equal(L.computeBalance(s, '2026-10').amount, 5000);
+  const m = L.monthSummary(s, '2026-10');
+  assert.equal(m.total, 10000);
+  assert.ok(!m.categories.some((c) => c.id === 'sport'));
+  assert.equal(L.recurringSummary(s, '2026-10').total, 0);
+  assert.equal(L.guessCategory(s, 'Basic Fit'), null);
+
+  // Vue perso de a : ses dépenses et abonnements, son budget Sport dépassé.
+  const pa = L.personalState(s, 'a');
+  const an = L.analyzeMonth(pa, '2026-10', '2026-10-26');
+  assert.equal(an.total, 7500);
+  assert.deepEqual(an.alerts.map((x) => [x.categoryId, x.level]), [['sport', 'over']]);
+  assert.equal(an.categories.find((c) => c.id === 'courses').budget, 0); // budgets du couple non repris
+  assert.equal(L.computeBalance(pa, '2026-10').amount, 0);
+  assert.equal(L.monthExpenses(pa, '2026-10').find((e) => e.recurringId).personal, 'a');
+
+  // Ce que chacun dépense vraiment : part du couple + perso.
+  assert.deepEqual(L.personalTotal(s, 'a', '2026-10'), { couple: 5000, perso: 7500, total: 12500 });
+  assert.deepEqual(L.personalTotal(s, 'b', '2026-10'), { couple: 5000, perso: 1200, total: 6200 });
+});

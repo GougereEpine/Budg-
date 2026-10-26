@@ -236,3 +236,38 @@ test('hors ligne : ajouts mis en attente puis envoyés au retour du réseau', { 
   assert.deepEqual(page.errors, []);
   await context.close();
 });
+
+test('espace perso : dépense hors du couple, budget perso et vue totale', async () => {
+  const state = baseState({ expenses: [e('1', 'Courses', 10000, { date: new Date().toISOString().slice(0, 10) })] });
+  const { context, page } = await openApp(browser, url, { state });
+  assert.match(await text(page, '.balance'), /Lola doit à Maxime 50 €/);
+
+  // Dépense perso : la répartition disparaît, le solde du couple ne bouge pas.
+  await page.click('#tabs .fab');
+  await page.click('#modal .seg label:has(input[value=perso]) span');
+  assert.equal(await page.isVisible('#modal [name=splitMode]'), false);
+  await page.fill('#modal [name=amount]', '60');
+  await page.fill('#modal [name=label]', 'Basic Fit');
+  await page.click('#modal button[type=submit]');
+  assert.match(await text(page, '.balance'), /Lola doit à Maxime 50 €/);
+  assert.equal(await page.$$eval('#view .card.list [data-expense]', (x) => x.length), 1);
+
+  // Espace perso : part du couple + perso, budget perso dépassé.
+  await page.click('[data-goto=perso]');
+  assert.match(await text(page, '.share-cols'), /Part du couple ?50 €.*Perso ?60 €/);
+  await page.click('[data-add-perso-cat]');
+  await page.fill('#modal [name=name]', 'Sport');
+  await page.fill('#modal [name=icon]', '🏋️');
+  await page.fill('#modal [name=amount]', '40');
+  await page.click('#modal button[type=submit]');
+  await page.click('[data-expense]');
+  await page.selectOption('#modal [name=categoryId]', { label: '🏋️ Sport' });
+  await page.click('#modal button[type=submit]');
+  assert.match(await text(page, '.alert.over'), /Sport : 150 % du budget/);
+  // Les catégories perso n'apparaissent pas dans les réglages du couple.
+  await page.click('[data-goto=home]');
+  await page.click('[data-settings]');
+  assert.equal(await page.$$eval('[data-cat]', (x) => x.length), 3);
+  assert.deepEqual(page.errors, []);
+  await context.close();
+});

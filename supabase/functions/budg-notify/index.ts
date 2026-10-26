@@ -159,14 +159,14 @@ async function loadState(hid: string) {
       { id: 'b', name: h.name_b },
     ],
     defaultSplit: h.default_split,
-    categories: (cats.data || []).map((r) => ({ id: r.id, name: r.name, icon: r.icon, budget: r.budget, period: r.period, position: r.position })),
+    categories: (cats.data || []).map((r) => ({ id: r.id, name: r.name, icon: r.icon, budget: r.budget, period: r.period, position: r.position, owner: r.owner })),
     expenses: (exps.data || []).map((r) => ({
       id: r.id, date: r.date, label: r.label, amount: r.amount, payer: r.payer, categoryId: r.category_id, split: r.split,
-      shareA: r.share_a, byUsage: r.by_usage, isIncome: r.is_income, extraA: r.extra_a, extraB: r.extra_b,
+      shareA: r.share_a, byUsage: r.by_usage, isIncome: r.is_income, extraA: r.extra_a, extraB: r.extra_b, owner: r.owner,
     })),
     recurring: (recs.data || []).map((r) => ({
       id: r.id, label: r.label, amount: r.amount, payer: r.payer, categoryId: r.category_id, split: r.split, shareA: r.share_a,
-      byUsage: r.by_usage, day: r.day, startMonth: r.start_month, endMonth: r.end_month,
+      byUsage: r.by_usage, owner: r.owner, day: r.day, startMonth: r.start_month, endMonth: r.end_month,
     })),
     transfers: (trs.data || []).map((r) => ({ id: r.id, date: r.date, from: r.from_person, to: r.to_person, amount: r.amount, note: r.note })),
     recurringTransfers: (rtrs.data || []).map((r) => ({

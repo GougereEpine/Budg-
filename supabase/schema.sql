@@ -28,6 +28,7 @@ create table public.budg_categories (
   icon text not null default '📦',
   budget int not null default 0 check (budget >= 0),
   period text not null default 'month' check (period in ('month', 'year')), -- budget par mois ou par an
+  owner text check (owner in ('a', 'b')), -- catégorie perso ; null = couple
   position int not null default 0
 );
 
@@ -45,6 +46,7 @@ create table public.budg_expenses (
   is_income boolean not null default false, -- entrée d'argent (remboursement EDF…) : déduite
   extra_a int not null default 0 check (extra_a >= 0), -- articles pour 'a' seul (shampoing…)
   extra_b int not null default 0 check (extra_b >= 0),
+  owner text check (owner in ('a', 'b')), -- dépense perso de 'a' ou 'b' (hors couple) ; null = couple
   created_by uuid default auth.uid() references auth.users (id) on delete set null,
   created_at timestamptz not null default now()
 );
@@ -59,6 +61,7 @@ create table public.budg_recurring (
   split int not null check (split between 0 and 100),
   share_a int check (share_a >= 0 and share_a <= amount),
   by_usage boolean not null default false,
+  owner text check (owner in ('a', 'b')), -- abonnement perso ; null = couple
   day int not null default 1 check (day between 1 and 31),
   start_month text not null check (start_month ~ '^\d{4}-\d{2}$'),
   end_month text check (end_month ~ '^\d{4}-\d{2}$')
@@ -279,6 +282,12 @@ as $$
 declare
   secret text;
 begin
+  -- Dépenses perso : pas de notification à l'autre.
+  if TG_TABLE_NAME = 'budg_expenses' then
+    if new.owner is not null then
+      return new;
+    end if;
+  end if;
   select value into secret from public.budg_server_config where key = 'webhook_secret';
   perform net.http_post(
     url := 'https://sxnndcxqdsaiqucxvijb.supabase.co/functions/v1/budg-notify',

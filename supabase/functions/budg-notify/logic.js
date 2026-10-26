@@ -90,6 +90,35 @@
     };
   }
 
+  // Espace perso : une dépense, un abonnement ou une catégorie avec `owner`
+  // ('a' ou 'b') n'appartient qu'à cette personne et reste hors des comptes du couple.
+  function shared(list) {
+    return (list || []).filter((x) => !x.owner);
+  }
+
+  // Vue « perso » de `p`, au même format que l'état du couple : ses dépenses et
+  // abonnements perso (entièrement à sa charge), ses catégories perso et celles
+  // du couple (sans budget). Les calculs habituels s'y appliquent tels quels.
+  function personalState(state, p) {
+    const mine = (list) =>
+      (list || [])
+        .filter((x) => x.owner === p)
+        .map((x) => ({ ...x, owner: null, personal: p, payer: p, split: p === 'a' ? 100 : 0, shareA: null, byUsage: false, extraA: 0, extraB: 0 }));
+    const cats = (state.categories || [])
+      .filter((c) => c.owner === p)
+      .map((c) => ({ ...c, owner: null, personal: p }))
+      .concat(shared(state.categories).map((c) => ({ ...c, budget: 0, period: 'month' })));
+    return { ...state, expenses: mine(state.expenses), recurring: mine(state.recurring), categories: cats, transfers: [], recurringTransfers: [] };
+  }
+
+  // Ce que `p` dépense vraiment sur un mois : sa part des dépenses du couple
+  // plus ses dépenses perso.
+  function personalTotal(state, p, month) {
+    const couple = monthSummary(state, month).share[p];
+    const perso = monthSummary(personalState(state, p), month).total;
+    return { couple, perso, total: couple + perso };
+  }
+
   // Génère les occurrences mensuelles des charges fixes jusqu'au mois `upTo` inclus.
   function expandRecurring(recurring, upTo) {
     const out = [];
@@ -109,6 +138,7 @@
           split: r.split,
           shareA: r.shareA,
           byUsage: Boolean(r.byUsage),
+          ...(r.personal ? { personal: r.personal } : {}),
         });
       }
     }
@@ -155,8 +185,8 @@
 
   // Dépenses ponctuelles + occurrences des charges fixes, jusqu'au mois `upTo`.
   function allExpenses(state, upTo) {
-    const real = state.expenses.filter((e) => monthKey(e.date) <= upTo);
-    return real.concat(expandRecurring(state.recurring, upTo)).map((e) => signed(withUsage(state, e)));
+    const real = shared(state.expenses).filter((e) => monthKey(e.date) <= upTo);
+    return real.concat(expandRecurring(shared(state.recurring), upTo)).map((e) => signed(withUsage(state, e)));
   }
 
   // Solde du couple : net.a > 0 signifie que b doit net.a à a.
@@ -165,7 +195,7 @@
   // (en général le mois en cours).
   function computeBalance(state, upTo) {
     const net = { a: 0, b: 0 };
-    for (const raw of state.expenses.concat(expandRecurring(state.recurring, upTo))) {
+    for (const raw of shared(state.expenses).concat(expandRecurring(shared(state.recurring), upTo))) {
       const e = signed(withUsage(state, raw));
       const s = sharesOf(e);
       net[e.payer] += e.amount;
@@ -202,18 +232,18 @@
       share.b += s.b;
       byCategory[e.categoryId] = (byCategory[e.categoryId] || 0) + e.amount;
     }
-    const categories = state.categories.map((c) => ({
+    const categories = shared(state.categories).map((c) => ({
       ...c,
       spent: byCategory[c.id] || 0,
       remaining: c.budget - (byCategory[c.id] || 0),
     }));
-    const budgetTotal = state.categories.reduce((sum, c) => sum + (c.budget || 0), 0);
+    const budgetTotal = shared(state.categories).reduce((sum, c) => sum + (c.budget || 0), 0);
     return { month, expenses, total, paid, share, categories, budgetTotal };
   }
 
   // Coût mensuel des charges fixes actives sur un mois donné.
   function recurringSummary(state, month) {
-    const active = state.recurring.filter(
+    const active = shared(state.recurring).filter(
       (r) => r.startMonth <= month && (!r.endMonth || r.endMonth >= month)
     );
     const paid = { a: 0, b: 0 };
@@ -289,7 +319,7 @@
     if (key.length < 2) return null;
     const first = key.split(' ')[0];
     const scores = {};
-    for (const e of state.expenses) {
+    for (const e of shared(state.expenses)) {
       if (e.isIncome || !e.categoryId) continue;
       const k = normalizeLabel(e.label);
       const w = k === key ? 3 : first.length >= 3 && k.split(' ')[0] === first ? 1 : 0;
@@ -305,7 +335,7 @@
   function favorites(state, today, n = 5) {
     const since = addMonths(monthKey(today), -4);
     const groups = {};
-    for (const e of state.expenses) {
+    for (const e of shared(state.expenses)) {
       if (e.isIncome || monthKey(e.date) < since) continue;
       const k = normalizeLabel(e.label);
       if (!k) continue;
@@ -510,6 +540,9 @@
 
   const api = {
     analyzeMonth,
+    shared,
+    personalState,
+    personalTotal,
     goalProgress,
     normalizeLabel,
     guessCategory,

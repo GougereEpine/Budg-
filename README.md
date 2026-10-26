@@ -21,6 +21,9 @@ suit les **budgets du mois** et prévient quand ça dérape.
 - **Budgets** par catégorie, par mois (Courses 400 €, Restaurants 100 €…) ou **par an** pour les
   dépenses irrégulières (Vacances 1 800 €/an) : suivi depuis janvier et cagnotte qui grossit de 1/12e
   chaque mois ; comparaison avec le mois dernier et la moyenne mensuelle.
+- **Espace perso** : chacun peut noter ses dépenses, abonnements et budgets à lui (sport,
+  vêtements…), hors du solde, des budgets et des notifications du couple. L'autre peut les consulter
+  sans les modifier, et la vue totale montre ce que chacun dépense vraiment : sa part du couple + son perso.
 - **Projets d'épargne** à deux (« Japon 2027 : 3 000 € ») : versements de chacun, progression
   et montant à mettre de côté chaque mois pour tenir l'échéance.
 - **Rappel de règlement** : au-delà d'un seuil choisi, la personne qui doit reçoit un rappel

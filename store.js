@@ -94,8 +94,8 @@
   const TABLES = {
     categories: {
       table: 'budg_categories',
-      toRow: (c) => ({ id: c.id, name: c.name, icon: c.icon, budget: c.budget, period: c.period || 'month', position: c.position }),
-      fromRow: (r) => ({ id: r.id, name: r.name, icon: r.icon, budget: r.budget, period: r.period, position: r.position }),
+      toRow: (c) => ({ id: c.id, name: c.name, icon: c.icon, budget: c.budget, period: c.period || 'month', position: c.position, owner: c.owner || null }),
+      fromRow: (r) => ({ id: r.id, name: r.name, icon: r.icon, budget: r.budget, period: r.period, position: r.position, owner: r.owner }),
     },
     expenses: {
       table: 'budg_expenses',
@@ -112,6 +112,7 @@
         is_income: Boolean(e.isIncome),
         extra_a: e.extraA || 0,
         extra_b: e.extraB || 0,
+        owner: e.owner || null,
       }),
       fromRow: (r) => ({
         id: r.id,
@@ -126,6 +127,7 @@
         isIncome: r.is_income,
         extraA: r.extra_a,
         extraB: r.extra_b,
+        owner: r.owner,
         createdBy: r.created_by,
       }),
     },
@@ -140,6 +142,7 @@
         split: x.split,
         share_a: x.shareA == null ? null : x.shareA,
         by_usage: Boolean(x.byUsage),
+        owner: x.owner || null,
         day: x.day,
         start_month: x.startMonth,
         end_month: x.endMonth || null,
@@ -153,6 +156,7 @@
         split: r.split,
         shareA: r.share_a,
         byUsage: r.by_usage,
+        owner: r.owner,
         day: r.day,
         startMonth: r.start_month,
         endMonth: r.end_month,
@@ -558,7 +562,8 @@
 
     detectPartnerActivity() {
       const items = [
-        ...this.state.expenses.map((x) => ['expense', x]),
+        // Dépenses perso : pas d'alerte chez l'autre.
+        ...this.state.expenses.filter((x) => !x.owner).map((x) => ['expense', x]),
         ...this.state.transfers.map((x) => ['transfer', x]),
       ];
       const first = this.knownIds == null;
