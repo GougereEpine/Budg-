@@ -111,6 +111,26 @@
     return { ...state, expenses: mine(state.expenses), recurring: mine(state.recurring), categories: cats, transfers: [], recurringTransfers: [] };
   }
 
+  // Vue « totale » de `p` jusqu'au mois `upTo` : sa part de chaque dépense du
+  // couple (charges fixes comprises, catégorie du couple sans budget) plus son
+  // perso. Même format que l'état du couple, pour réutiliser l'analyse.
+  function totalState(state, p, upTo) {
+    const ps = personalState(state, p);
+    const couple = allExpenses(state, upTo)
+      .map((e) => ({
+        id: `${e.id}#${p}`,
+        recurringId: e.recurringId,
+        date: e.date,
+        label: e.label,
+        categoryId: e.categoryId,
+        amount: sharesOf(e)[p],
+        payer: p,
+        split: p === 'a' ? 100 : 0,
+      }))
+      .filter((e) => e.amount !== 0);
+    return { ...ps, expenses: couple.concat(ps.expenses) };
+  }
+
   // Ce que `p` dépense vraiment sur un mois : sa part des dépenses du couple
   // plus ses dépenses perso.
   function personalTotal(state, p, month) {
@@ -511,7 +531,8 @@
     const budgeted = categories.filter((c) => c.budget > 0 && !c.annual);
     const budgetSpent = budgeted.reduce((s, c) => s + c.spent, 0);
     const budgetTotal = budgeted.reduce((s, c) => s + c.budget, 0);
-    const fixedTotal = categories.reduce((s, c) => s + c.fixed, 0);
+    // Compté sur les dépenses elles-mêmes : une charge fixe sans catégorie reste une charge fixe.
+    const fixedTotal = summary.expenses.filter((e) => e.recurringId).reduce((s, e) => s + e.amount, 0);
     const projectedTotal = project(fixedTotal, summary.total - fixedTotal);
     const prevAverage = withData.length
       ? Math.round(withData.reduce((s, x) => s + x.total, 0) / withData.length)
@@ -526,6 +547,7 @@
       budgetTotal,
       budgetPct: budgetTotal > 0 ? Math.round((budgetSpent / budgetTotal) * 100) : null,
       projectedTotal,
+      fixedTotal,
       prevAverage,
       vsAverage: prevAverage ? Math.round(((summary.total - prevAverage) / prevAverage) * 100) : null,
       history: [...prevSummaries]
@@ -543,6 +565,7 @@
     shared,
     personalState,
     personalTotal,
+    totalState,
     goalProgress,
     normalizeLabel,
     guessCategory,

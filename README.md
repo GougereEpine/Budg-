@@ -36,7 +36,8 @@ suit les **budgets du mois** et prévient quand ça dérape.
   - projection de fin de mois au rythme actuel (« à ce rythme, 110 % du budget resto ») ;
     les charges fixes ne sont pas extrapolées ;
   - comparaison avec la moyenne des 3 mois précédents, par catégorie et au total ;
-  - évolution sur 4 mois, qui a payé et quelle est la part de chacun.
+  - évolution sur 4 mois, qui a payé et quelle est la part de chacun ;
+  - trois vues : **Couple**, **Perso**, ou **Total** (sa part de chaque dépense du couple + son perso).
 - **En ligne et en temps réel** avec Supabase : chacun a son compte, le couple est relié par
   un code d'invitation, et ce que l'un saisit apparaît aussitôt chez l'autre.
 - Mode **hors ligne** (sans compte, données dans le navigateur), export / import JSON.
