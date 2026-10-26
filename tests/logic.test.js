@@ -551,3 +551,23 @@ Food excl Set Menus 159.80`;
     ['OPTIONAL Team Tip', 2203],
   ]);
 });
+
+test('budget perso sur une catégorie du couple (même nom) : ses dépenses perso y comptent', () => {
+  const s = baseState({
+    categories: [...baseState().categories, { id: 'p-resto', name: 'restaurants', icon: '🍽️', budget: 3000, position: 9, owner: 'a' }],
+    expenses: [
+      { id: '1', date: '2026-10-05', label: 'Kebab', amount: 2500, payer: 'a', categoryId: 'resto', split: 100, owner: 'a' },
+      { id: '2', date: '2026-10-06', label: 'Sushi', amount: 1000, payer: 'a', categoryId: 'p-resto', split: 100, owner: 'a' },
+      { id: '3', date: '2026-10-07', label: 'Resto à deux', amount: 4000, payer: 'b', categoryId: 'resto', split: 50 },
+    ],
+  });
+  const an = L.analyzeMonth(L.personalState(s, 'a'), '2026-10', '2026-10-26');
+  assert.equal(an.categories.find((c) => c.id === 'p-resto').spent, 3500);
+  assert.ok(!an.categories.some((c) => c.id === 'resto')); // pas de doublon
+  assert.deepEqual(an.alerts.map((x) => [x.categoryId, x.level]), [['p-resto', 'over']]);
+  // Le couple n'est pas touché.
+  assert.equal(L.monthSummary(s, '2026-10').categories.find((c) => c.id === 'resto').spent, 4000);
+  // Vue totale : sa part du resto à deux compte aussi dans son budget restaurants.
+  const tot = L.analyzeMonth(L.totalState(s, 'a', '2026-10'), '2026-10', '2026-10-26');
+  assert.equal(tot.categories.find((c) => c.id === 'p-resto').spent, 5500);
+});
