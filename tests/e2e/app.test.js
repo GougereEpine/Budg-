@@ -315,10 +315,13 @@ test('ticket de caisse : photo lue, articles attribués, dépense préremplie', 
   await page.click('.receipt-item:nth-child(2) .seg label:has(input[value=a]) span');
   await page.click('.receipt-item:nth-child(3) .seg label:has(input[value=b]) span');
   assert.match(await text(page, '[data-receipt-sum]'), /Maxime 4,87 € · Lola 2,92 €/);
+  // ✕ : le lait n'est pas compté, il est retiré du total.
+  await page.click('.receipt-item:nth-child(1) .seg label:has(input[value=x]) span');
+  assert.match(await text(page, '[data-receipt-sum]'), /Retiré 1,15 € · dépense 6,64 €.*Maxime 4,29 € · Lola 2,35 €/);
   await page.click('#modal button[type=submit]');
-  assert.equal(await page.inputValue('#modal [name=amount]'), '7,79');
+  assert.equal(await page.inputValue('#modal [name=amount]'), '6,64');
   await page.click('#modal button[type=submit]');
-  assert.match(await text(page, '.balance'), /Lola doit à Maxime 2,92 €/);
+  assert.match(await text(page, '.balance'), /Lola doit à Maxime 2,35 €/);
   assert.deepEqual(page.errors, []);
   await context.close();
 });
