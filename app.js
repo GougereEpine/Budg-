@@ -1937,7 +1937,8 @@
         <button class="icon-btn" data-add-rt aria-label="Ajouter un remboursement automatique">＋</button></div>
       <div class="card list">
         ${rtList.length ? rtList.map(rtItem).join('') : `<div class="empty">Ex. : ${esc(name(debtor))} rembourse sa part des charges fixes chaque début de mois.<br><br><button class="btn" data-add-rt>＋ Ajouter un remboursement auto</button></div>`}
-      </div>`;
+      </div>
+      ${persoFixedHtml(cur)}`;
 
     view.querySelectorAll('details[data-group]').forEach((d) => {
       d.ontoggle = () => {
@@ -1947,6 +1948,37 @@
     });
     view.querySelectorAll('[data-add-recurring]').forEach((b) => (b.onclick = () => recurringForm(null)));
     view.querySelectorAll('[data-add-rt]').forEach((b) => (b.onclick = () => recurringTransferForm(null)));
+    view.querySelectorAll('[data-add-perso-fixed]').forEach((b) => (b.onclick = () => recurringForm(null, { owner: b.dataset.addPersoFixed })));
+  }
+
+  // Charges fixes perso (les siennes ; hors ligne, celles des deux) : à part du total du couple.
+  function persoFixedHtml(cur) {
+    const people = S.mode === 'cloud' ? [me()] : ['a', 'b'];
+    return people
+      .map((p) => {
+        const list = S.state.recurring.filter((r) => r.owner === p).sort((x, y) => y.amount - x.amount);
+        const active = list.filter((r) => r.startMonth <= cur && (!r.endMonth || r.endMonth >= cur));
+        const total = active.reduce((sum, r) => sum + r.amount, 0);
+        const item = (r) => {
+          const c = category(r.categoryId);
+          const on = active.includes(r);
+          const when = r.startMonth > cur ? `à partir de ${monthLabel(r.startMonth)}` : r.endMonth && r.endMonth < cur ? `terminé en ${monthLabel(r.endMonth)}` : `le ${r.day} du mois`;
+          return `
+            <div class="item" data-recurring="${r.id}" style="${on ? '' : 'opacity:.6'}">
+              <div class="emoji">${esc(c.icon)}</div>
+              <div class="body"><div class="title">${esc(r.label)}</div><div class="sub">${esc(c.name)} · ${esc(when)}</div></div>
+              <div class="right"><div class="amt num">${euro(r.amount)}<span class="small muted">/mois</span></div></div>
+            </div>`;
+        };
+        const title = S.mode === 'cloud' ? 'Mes fixes perso' : `Fixes perso de ${esc(name(p))}`;
+        return `
+          <div class="topbar"><h2>👤 ${title}${total ? ` · ${euro(total)}/mois` : ''}</h2>
+            <button class="icon-btn" data-add-perso-fixed="${p}" aria-label="Ajouter une charge fixe perso">＋</button></div>
+          <div class="card list">
+            ${list.length ? list.map(item).join('') : '<div class="empty">Téléphone, salle de sport, streaming… : hors du couple, rien que pour vous.</div>'}
+          </div>`;
+      })
+      .join('');
   }
 
   function renderBudget() {
