@@ -248,9 +248,12 @@
       list.map((c) => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('');
     if (!owner) return opts(sortedCategories());
     const mine = sortedCategories(owner);
+    // Une catégorie du couple qui a sa version perso (même nom) n'est proposée qu'une fois.
+    const replaced = L.personalCategoryMap(S.state, owner);
+    const couple = sortedCategories().filter((c) => !replaced[c.id]);
     return mine.length
-      ? `<optgroup label="Mes catégories">${opts(mine)}</optgroup><optgroup label="Catégories du couple">${opts(sortedCategories())}</optgroup>`
-      : opts(sortedCategories());
+      ? `<optgroup label="Mes catégories">${opts(mine)}</optgroup><optgroup label="Catégories du couple">${opts(couple)}</optgroup>`
+      : opts(couple);
   }
 
   function categoryField(selected, owner = null) {
@@ -2414,9 +2417,19 @@
 
   function persoCategoryForm(existing, owner) {
     const c = existing || { id: S.newId(), name: '', icon: '🏷️', budget: 0, period: 'month', owner };
+    // Catégories du couple pas encore reprises en perso : un toucher remplit l'icône et le nom.
+    const replaced = L.personalCategoryMap(S.state, owner);
+    const picks = existing ? [] : sortedCategories().filter((x) => !replaced[x.id]);
     openModal(
       existing ? `${c.icon} ${c.name}` : 'Nouveau budget perso',
       `
+      ${
+        picks.length
+          ? `<p class="hint" style="margin-top:0">Reprendre une catégorie existante (vos dépenses perso déjà classées dedans y comptent) :</p>
+             <div class="chips cat-picks">${picks.map((x) => `<button type="button" class="chip" data-pick-cat="${x.id}">${esc(x.icon)} ${esc(x.name)}</button>`).join('')}</div>
+             <p class="hint">Ou créez la vôtre :</p>`
+          : ''
+      }
       <div class="row">
         <label class="field" style="flex:0 0 70px"><span>Icône</span><input name="icon" value="${esc(c.icon)}" maxlength="8" required></label>
         <label class="field"><span>Nom</span><input name="name" value="${esc(c.name)}" placeholder="Sport, vêtements, sorties…" maxlength="30" required></label>
@@ -2429,6 +2442,18 @@
         <input class="big" name="amount" inputmode="decimal" placeholder="0 €" value="${amountValue(c.budget)}" autocomplete="off">
       </label>`,
       {
+        onOpen: (form) => {
+          form.querySelectorAll('[data-pick-cat]').forEach((b) => {
+            b.onclick = () => {
+              const x = S.state.categories.find((y) => y.id === b.dataset.pickCat);
+              if (!x) return;
+              form.icon.value = x.icon;
+              form.name.value = x.name;
+              form.querySelectorAll('[data-pick-cat]').forEach((y) => y.classList.toggle('active', y === b));
+              modalDirty = true;
+            };
+          });
+        },
         onSubmit: async (form) => {
           const v = form.amount.value.trim();
           const budget = v === '' ? 0 : L.parseAmount(v);

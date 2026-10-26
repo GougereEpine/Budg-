@@ -1446,3 +1446,9 @@ select.guessed {
   text-align: right;
   font-size: 0.85rem;
 }
+
+.cat-picks {
+  flex-wrap: wrap;
+  overflow: visible;
+  margin-bottom: 4px;
+}

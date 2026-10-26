@@ -106,16 +106,42 @@
   // Vue « perso » de `p`, au même format que l'état du couple : ses dépenses et
   // abonnements perso (entièrement à sa charge), ses catégories perso et celles
   // du couple (sans budget). Les calculs habituels s'y appliquent tels quels.
+  // Une catégorie perso du même nom qu'une catégorie du couple (« Restaurants »)
+  // la remplace : ses dépenses perso comptent dans le budget perso.
   function personalState(state, p) {
+    const remap = personalCategoryMap(state, p);
     const mine = (list) =>
       (list || [])
         .filter((x) => x.owner === p)
-        .map((x) => ({ ...x, owner: null, personal: p, payer: p, split: p === 'a' ? 100 : 0, shareA: null, byUsage: false, extraA: 0, extraB: 0 }));
+        .map((x) => ({
+          ...x,
+          categoryId: remap[x.categoryId] || x.categoryId,
+          owner: null,
+          personal: p,
+          payer: p,
+          split: p === 'a' ? 100 : 0,
+          shareA: null,
+          byUsage: false,
+          extraA: 0,
+          extraB: 0,
+        }));
     const cats = (state.categories || [])
       .filter((c) => c.owner === p)
       .map((c) => ({ ...c, owner: null, personal: p }))
-      .concat(shared(state.categories).map((c) => ({ ...c, budget: 0, period: 'month' })));
+      .concat(shared(state.categories).filter((c) => !remap[c.id]).map((c) => ({ ...c, budget: 0, period: 'month' })));
     return { ...state, expenses: mine(state.expenses), recurring: mine(state.recurring), categories: cats, transfers: [], recurringTransfers: [] };
+  }
+
+  // Catégories du couple qui ont une catégorie perso du même nom chez `p` : id du couple -> id perso.
+  function personalCategoryMap(state, p) {
+    const own = {};
+    for (const c of state.categories || []) if (c.owner === p) own[normalizeLabel(c.name)] = c.id;
+    const map = {};
+    for (const c of shared(state.categories)) {
+      const id = own[normalizeLabel(c.name)];
+      if (id) map[c.id] = id;
+    }
+    return map;
   }
 
   // Vue « totale » de `p` jusqu'au mois `upTo` : sa part de chaque dépense du
@@ -123,13 +149,14 @@
   // perso. Même format que l'état du couple, pour réutiliser l'analyse.
   function totalState(state, p, upTo) {
     const ps = personalState(state, p);
+    const remap = personalCategoryMap(state, p);
     const couple = allExpenses(state, upTo)
       .map((e) => ({
         id: `${e.id}#${p}`,
         recurringId: e.recurringId,
         date: e.date,
         label: e.label,
-        categoryId: e.categoryId,
+        categoryId: remap[e.categoryId] || e.categoryId,
         amount: sharesOf(e)[p],
         payer: p,
         split: p === 'a' ? 100 : 0,
@@ -630,6 +657,7 @@
     shared,
     withoutFixed,
     personalState,
+    personalCategoryMap,
     personalTotal,
     totalState,
     goalProgress,
