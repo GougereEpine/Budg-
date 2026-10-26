@@ -22,6 +22,7 @@
     // Accueil : charges fixes masquées par défaut (réglage séparé).
     hideFixedHome: readPref('budg-hide-fixed-home') !== '0',
     persoOf: null, // espace perso affiché ('a' ou 'b'), par défaut le sien
+    scope: 'couple', // Analyse : 'couple', 'perso' ou 'total' (sa part du couple + son perso)
   };
 
   // Préférences propres à cet appareil (le stockage peut être indisponible).
@@ -1785,8 +1786,21 @@
   }
 
   function renderBudget() {
-    const state = S.state;
+    const p = persoOf();
+    const scope = ui.scope;
+    const couple = scope === 'couple';
+    const state = couple ? S.state : scope === 'perso' ? L.personalState(S.state, p) : L.totalState(S.state, p, ui.month);
     const an = L.analyzeMonth(state, ui.month, today());
+    // Seules les catégories du couple (vue Couple) et les catégories perso (autres vues) ont un budget modifiable ici.
+    const catAttr = (c) => (couple ? `data-category="${c.id}"` : c.personal && (S.mode !== 'cloud' || p === me()) ? `data-perso-cat="${c.id}"` : '');
+    const who = S.mode === 'cloud' && p === me() ? 'moi' : name(p);
+    const scopeChips = `
+      <div class="seg" style="margin-bottom:12px">
+        ${[['couple', '👥 Couple'], ['perso', `👤 Perso`], ['total', '∑ Total']]
+          .map(([v, l]) => `<label><input type="radio" name="scope" value="${v}" ${scope === v ? 'checked' : ''}><span>${l}</span></label>`)
+          .join('')}
+      </div>
+      ${couple ? '' : `<p class="hint" style="margin:-4px 4px 10px">${scope === 'perso' ? `Dépenses perso de ${esc(who)}.` : `Part du couple + perso de ${esc(who)} : ce que ${S.mode === 'cloud' && p === me() ? 'tu dépenses' : `${esc(name(p))} dépense`} vraiment.`}${S.mode !== 'cloud' ? ` <button class="btn link" data-scope-person>Voir ${esc(name(other(p)))}</button>` : ''}</p>`}`;
     const isCurrent = ui.month === currentMonth();
     const isPast = ui.month < currentMonth();
 
@@ -1818,7 +1832,7 @@
           ? `cagnotte disponible <b>${euro(c.available)}</b>`
           : `<b style="color:var(--warn)">${euro(-c.available)} d'avance sur la cagnotte</b>`;
       return `
-        <div class="budget-row level-${c.level}" data-category="${c.id}">
+        <div class="budget-row level-${c.level}" ${catAttr(c)}>
           <div class="budget-head">
             <span class="name">${esc(c.icon)} ${esc(c.name)}</span>
             <span class="num">${euro(c.ytd)} <span class="muted small">/ ${euro(c.budget)}/an</span> <span class="pill ${pctClass(c.level)}">${c.pct} %</span></span>
@@ -1846,7 +1860,7 @@
         if (isCurrent && c.projected > c.budget) detail += ` · projection ${euro(c.projected)}`;
       }
       return `
-        <div class="budget-row level-${c.level}" data-category="${c.id}">
+        <div class="budget-row level-${c.level}" ${catAttr(c)}>
           <div class="budget-head">
             <span class="name">${esc(c.icon)} ${esc(c.name)}</span>
             <span class="num">${euro(c.spent)}${c.budget ? ` <span class="muted small">/ ${euro(c.budget)}</span>` : ''} ${pill}</span>
@@ -1885,6 +1899,7 @@
     view.innerHTML = `
       <div class="topbar"><h1>Analyse</h1>
         <button class="icon-btn" data-edit-budgets aria-label="Modifier les budgets">✏️</button></div>
+      ${scopeChips}
       ${monthNav()}
       <div class="stats">
         <div class="stat"><div class="label">Dépensé</div><div class="value num">${euro(an.total)}</div><div class="delta">${delta}</div></div>
@@ -1898,12 +1913,12 @@
             : ''
         }
         <div class="stat"><div class="label">Charges fixes</div>
-          <div class="value num">${euro(an.categories.reduce((s, c) => s + c.fixed, 0))}</div>
+          <div class="value num">${euro(an.fixedTotal)}</div>
           <div class="delta muted">incluses dans le total</div></div>
       </div>
 
       ${an.alerts.length ? `<h2>Alertes</h2>${an.alerts.map(alertHtml).join('')}` : ''}
-      ${carCard(ui.month)}
+      ${couple ? carCard(ui.month) : ''}
       <h2>Évolution</h2>
       <div class="card">
         <div class="list-head" style="margin:0 0 8px">
@@ -1916,21 +1931,37 @@
         <div class="history">${historyHtml}</div>
       </div>
 
-      ${goalsSection()}
+      ${couple ? goalsSection() : ''}
 
-      <h2>Budgets par catégorie</h2>
+      <h2>${couple ? 'Budgets par catégorie' : 'Budgets perso'}</h2>
       <div class="card" style="padding-top:4px;padding-bottom:4px">
-        ${budgeted.length ? budgeted.map(row).join('') : '<div class="empty">Aucun budget défini.<br>Touchez ✏️ pour en créer (ex. Courses 400 €).</div>'}
+        ${budgeted.length ? budgeted.map(row).join('') : couple ? '<div class="empty">Aucun budget défini.<br>Touchez ✏️ pour en créer (ex. Courses 400 €).</div>' : '<div class="empty">Aucun budget perso.<br>Créez-en un depuis l\'écran Perso (Accueil → Mon perso).</div>'}
       </div>
       ${annual.length ? `<h2>Budgets annuels</h2><div class="card" style="padding-top:4px;padding-bottom:4px">${annual.map(row).join('')}</div>` : ''}
-      ${unbudgeted.length ? `<h2>Dépenses sans budget</h2><div class="card" style="padding-top:4px;padding-bottom:4px">${unbudgeted.map(row).join('')}</div>` : ''}
+      ${unbudgeted.length ? `<h2>${couple ? 'Dépenses sans budget' : 'Par catégorie'}</h2><div class="card" style="padding-top:4px;padding-bottom:4px">${unbudgeted.map(row).join('')}</div>` : ''}
 
-      <h2>Qui paie quoi</h2>
-      <div class="card">
-        ${whoPaidHtml(ui.month)}
-      </div>`;
+      ${couple ? `<h2>Qui paie quoi</h2><div class="card">${whoPaidHtml(ui.month)}</div>` : ''}`;
 
-    bindCarCard(ui.month);
+    view.querySelectorAll('[name=scope]').forEach((i) => {
+      i.onchange = () => {
+        ui.scope = i.value;
+        render();
+      };
+    });
+    const switchPerson = view.querySelector('[data-scope-person]');
+    if (switchPerson) {
+      switchPerson.onclick = () => {
+        ui.persoOf = other(p);
+        render();
+      };
+    }
+    view.querySelectorAll('[data-perso-cat]').forEach((el) => {
+      el.onclick = () => {
+        const c = S.state.categories.find((x) => x.id === el.dataset.persoCat);
+        if (c) persoCategoryForm(c, p);
+      };
+    });
+    if (couple) bindCarCard(ui.month);
     view.querySelectorAll('[data-add-goal]').forEach((b) => (b.onclick = () => goalForm(null)));
     view.querySelector('[data-hide-fixed]').onclick = () => {
       ui.hideFixed = !ui.hideFixed;
@@ -1939,6 +1970,11 @@
     };
 
     view.querySelector('[data-edit-budgets]').onclick = () => {
+      if (!couple) {
+        ui.tab = 'perso';
+        window.scrollTo(0, 0);
+        return render();
+      }
       ui.tab = 'settings';
       render();
       setTimeout(() => document.getElementById('categories')?.scrollIntoView({ behavior: 'smooth' }), 50);
@@ -2388,7 +2424,7 @@
     const navTab = ['shopping', 'settings', 'perso'].includes(ui.tab) ? 'home' : ui.tab;
     tabs.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === navTab));
     // Une synchro ne doit pas faire perdre ce qu'on est en train de taper.
-    const keep = focused && view.contains(focused) && focused.name && focused.matches('input')
+    const keep = focused && view.contains(focused) && focused.name && focused.matches('input:not([type=radio]):not([type=checkbox])')
       ? { name: focused.name, value: focused.value, start: focused.selectionStart, end: focused.selectionEnd }
       : null;
     const scroll = window.scrollY;

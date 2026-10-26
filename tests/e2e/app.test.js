@@ -271,3 +271,27 @@ test('espace perso : dépense hors du couple, budget perso et vue totale', async
   assert.deepEqual(page.errors, []);
   await context.close();
 });
+
+test('analyse : vues couple, perso et totale', async () => {
+  const d = new Date().toISOString().slice(0, 10);
+  const state = baseState({
+    categories: [...baseState().categories, { id: 'sport', name: 'Sport', icon: '🏋️', budget: 3000, period: 'month', position: 9, owner: 'a' }],
+    expenses: [
+      e('1', 'Courses', 10000, { date: d }),
+      e('2', 'Basic Fit', 3500, { date: d, categoryId: 'sport', split: 100, owner: 'a' }),
+    ],
+  });
+  const { context, page } = await openApp(browser, url, { state });
+  await page.click('[data-tab=budget]');
+  assert.match(await text(page, '.stats .stat'), /Dépensé ?100 €/);
+  assert.ok(await page.$('[data-add-goal]'));
+  await page.click('.seg label:has(input[value=perso]) span');
+  assert.match(await text(page, '.stats .stat'), /Dépensé ?35 €/);
+  assert.match(await text(page, '.alert.over'), /Sport : 117 % du budget/);
+  assert.equal(await page.$('[data-add-goal]'), null);
+  await page.click('.seg label:has(input[value=total]) span');
+  assert.match(await text(page, '.stats .stat'), /Dépensé ?85 €/);
+  assert.equal(await page.inputValue('.seg input[value=couple]'), 'couple');
+  assert.deepEqual(page.errors, []);
+  await context.close();
+});

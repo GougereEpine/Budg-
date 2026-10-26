@@ -440,3 +440,35 @@ test('espace perso : hors du couple, avec ses propres budgets et la vue totale',
   assert.deepEqual(L.personalTotal(s, 'a', '2026-10'), { couple: 5000, perso: 7500, total: 12500 });
   assert.deepEqual(L.personalTotal(s, 'b', '2026-10'), { couple: 5000, perso: 1200, total: 6200 });
 });
+
+test('vue totale : sa part de chaque dépense du couple + son perso, par catégorie', () => {
+  const s = baseState({
+    categories: [...baseState().categories, { id: 'sport', name: 'Sport', icon: '🏋️', budget: 5000, position: 9, owner: 'a' }],
+    expenses: [
+      { id: '1', date: '2026-10-05', label: 'Courses', amount: 10000, payer: 'b', categoryId: 'courses', split: 60 },
+      { id: '2', date: '2026-10-06', label: 'Cadeau Sam', amount: 3000, payer: 'a', categoryId: 'loisirs', split: 0 }, // rien pour a
+      { id: '3', date: '2026-10-08', label: 'EDF', amount: 2000, payer: 'b', categoryId: 'logement', split: 50, isIncome: true },
+      { id: '4', date: '2026-10-09', label: 'Basic Fit', amount: 3500, payer: 'a', categoryId: 'sport', split: 100, owner: 'a' },
+    ],
+    recurring: [{ id: 'loyer', label: 'Loyer', amount: 100000, payer: 'a', categoryId: 'logement', split: 50, day: 1, startMonth: '2026-01', endMonth: null }],
+  });
+  const t = L.totalState(s, 'a', '2026-10');
+  const an = L.analyzeMonth(t, '2026-10', '2026-10-26');
+  const spent = Object.fromEntries(an.categories.filter((c) => c.spent).map((c) => [c.id, c.spent]));
+  assert.deepEqual(spent, { sport: 3500, courses: 6000, logement: 50000 - 1000 });
+  assert.equal(an.total, 58500);
+  assert.equal(an.total, L.personalTotal(s, 'a', '2026-10').total);
+  assert.equal(an.history[3].fixed, 50000); // la part du loyer reste une charge fixe
+  assert.equal(an.categories.find((c) => c.id === 'courses').budget, 0);
+  assert.deepEqual(an.alerts, []);
+});
+
+test('analyse : une charge fixe sans catégorie reste une charge fixe (pas extrapolée)', () => {
+  const s = baseState({
+    expenses: [{ id: '1', date: '2026-10-10', label: 'Courses', amount: 10000, payer: 'a', categoryId: 'courses', split: 50 }],
+    recurring: [{ id: 'r', label: 'Loyer', amount: 100000, payer: 'a', categoryId: null, split: 50, day: 1, startMonth: '2026-10', endMonth: null }],
+  });
+  const an = L.analyzeMonth(s, '2026-10', '2026-10-16'); // la moitié du mois environ
+  assert.equal(an.fixedTotal, 100000);
+  assert.equal(an.projectedTotal, 100000 + Math.round(10000 / (16 / 31)));
+});
