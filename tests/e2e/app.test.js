@@ -223,7 +223,8 @@ test('hors ligne : ajouts mis en attente puis envoyés au retour du réseau', { 
   await page.fill('#modal [name=amount]', '30');
   await page.fill('#modal [name=label]', 'Boulangerie');
   await page.click('#modal button[type=submit]');
-  await page.waitForSelector('.sync-banner');
+  // La bannière « Hors ligne » apparaît dès la coupure : on attend que l'ajout y soit compté.
+  await page.waitForFunction(() => /en attente/.test(document.querySelector('.sync-banner')?.textContent || ''));
   assert.match(await text(page, '.sync-banner'), /Hors ligne.*1 modification en attente/);
   assert.match(await text(page, '.balance'), /Lola doit à Maxime 25 €/);
   assert.deepEqual(writes, []);
