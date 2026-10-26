@@ -706,17 +706,25 @@
     }
   }
 
+  // Deux lectures de la même photo : en colonnes (souvent meilleure sur un ticket
+  // froissé) et en bloc unique ; parseReceipt garde le meilleur des deux.
   async function readReceipt(file, onProgress) {
     const Tesseract = await loadTesseract();
     const image = await prepareReceiptImage(file);
+    let pass = 0;
     const worker = await Tesseract.createWorker('fra', 1, {
       logger: (m) => {
-        if (m.status === 'recognizing text') onProgress(Math.round(m.progress * 100));
+        if (m.status === 'recognizing text') onProgress(Math.round((pass * 100 + m.progress * 100) / 2));
       },
     });
     try {
-      const { data } = await worker.recognize(image);
-      return data.text;
+      const texts = [];
+      for (const psm of ['4', '6']) {
+        await worker.setParameters({ tessedit_pageseg_mode: psm });
+        texts.push((await worker.recognize(image)).data.text);
+        pass++;
+      }
+      return texts;
     } finally {
       worker.terminate();
     }
