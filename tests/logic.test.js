@@ -472,3 +472,30 @@ test('analyse : une charge fixe sans catégorie reste une charge fixe (pas extra
   assert.equal(an.fixedTotal, 100000);
   assert.equal(an.projectedTotal, 100000 + Math.round(10000 / (16 / 31)));
 });
+
+test('ticket de caisse : articles, remise et total', () => {
+  const text = `CARREFOUR MARKET
+LAIT DEMI ECREME 1L      1,15 A
+2 x 1,50
+PAIN DE MIE             3,00 B
+SHAMPOING DOP           4,29 C
+REMISE FIDELITE        -0,60
+MOUSSE AU CHOCO X4      2,35 A
+SOUS-TOTAL              10,19
+TOTAL                  10,19 €
+CB                     10,19
+TVA 5,5%                0,42
+RENDU                   0,00`;
+  const r = L.parseReceipt(text);
+  assert.equal(r.total, 1019);
+  assert.deepEqual(r.items.map((i) => [i.label, i.amount]), [
+    ['LAIT DEMI ECREME 1L', 115],
+    ['PAIN DE MIE', 300],
+    ['SHAMPOING DOP', 429],
+    ['MOUSSE AU CHOCO X4', 235],
+  ]);
+  // Sans ligne TOTAL lisible : le plus grand montant.
+  assert.equal(L.parseReceipt('Pommes 2,10\nBiere 7,90\n10,00').total, 1000);
+  // Shampoing pour a, dessert pour b : le reste est partagé.
+  assert.deepEqual(L.receiptExtras(r.items, ['ab', 'ab', 'a', 'b']), { extraA: 429, extraB: 235 });
+});

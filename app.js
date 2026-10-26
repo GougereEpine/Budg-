@@ -460,7 +460,9 @@
       id: S.newId(),
       date: today(),
       label: preset.label || '',
-      amount: 0,
+      amount: preset.amount || 0,
+      extraA: preset.extraA || 0,
+      extraB: preset.extraB || 0,
       payer: preset.owner || me(),
       owner: preset.owner || null,
       categoryId: preset.categoryId || (sortedCategories(preset.owner || null)[0] || sortedCategories()[0] || {}).id || null,
@@ -473,6 +475,13 @@
     openModal(
       titles[e.isIncome ? 1 : 0],
       `
+      ${
+        existing || preset.amount
+          ? ''
+          : `<div data-couple-only><button type="button" class="btn block scan-btn" data-scan>📷 Scanner un ticket de caisse</button>
+             <input type="file" accept="image/*" capture="environment" data-scan-file hidden>
+             <p class="hint" data-scan-status hidden></p></div>`
+      }
       ${
         favs.length
           ? `<div class="chips fav-chips">${favs
@@ -592,7 +601,28 @@
                 form.amount.select();
               };
             });
-            form.amount.focus();
+            // Ticket de caisse : photo → lecture sur le téléphone → choix article par article.
+            const scanBtn = form.querySelector('[data-scan]');
+            if (scanBtn) {
+              const file = form.querySelector('[data-scan-file]');
+              const status = form.querySelector('[data-scan-status]');
+              scanBtn.onclick = () => file.click();
+              file.onchange = async () => {
+                if (!file.files[0]) return;
+                scanBtn.disabled = true;
+                status.hidden = false;
+                status.textContent = 'Lecture du ticket…';
+                try {
+                  const text = await readReceipt(file.files[0], (pct) => (status.textContent = `Lecture du ticket… ${pct} %`));
+                  receiptForm(L.parseReceipt(text), { categoryId: form.categoryId.value });
+                } catch (err) {
+                  console.error(err);
+                  status.textContent = '⚠️ Lecture impossible : ' + errorMessage(err);
+                  scanBtn.disabled = false;
+                }
+              };
+            }
+            if (!preset.amount) form.amount.focus();
           }
         },
         onSubmit: async (form) => {
@@ -616,6 +646,137 @@
           if (preset.onSaved) await preset.onSaved();
         },
         onDelete: existing ? () => S.remove('expenses', e.id) : null,
+      }
+    );
+  }
+
+  // ---------- Ticket de caisse ----------
+
+  const TESSERACT_JS = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+
+  // Tesseract.js (lecture de texte, gratuite, faite sur le téléphone) n'est
+  // chargé qu'au premier ticket scanné.
+  let tesseractLoading = null;
+  function loadTesseract() {
+    if (window.Tesseract) return Promise.resolve(window.Tesseract);
+    tesseractLoading =
+      tesseractLoading ||
+      new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = TESSERACT_JS;
+        script.onload = () => resolve(window.Tesseract);
+        script.onerror = () => {
+          tesseractLoading = null;
+          reject(new Error('module de lecture introuvable (connexion ?)'));
+        };
+        document.head.appendChild(script);
+      });
+    return tesseractLoading;
+  }
+
+  // Photo réduite et passée en niveaux de gris contrastés : lecture plus rapide et plus fiable.
+  async function prepareReceiptImage(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => reject(new Error("image illisible"));
+        i.src = url;
+      });
+      const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const px = data.data;
+      for (let i = 0; i < px.length; i += 4) {
+        const g = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+        const v = Math.max(0, Math.min(255, (g - 128) * 1.6 + 128));
+        px[i] = px[i + 1] = px[i + 2] = v;
+      }
+      ctx.putImageData(data, 0, 0);
+      return canvas;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function readReceipt(file, onProgress) {
+    const Tesseract = await loadTesseract();
+    const image = await prepareReceiptImage(file);
+    const worker = await Tesseract.createWorker('fra', 1, {
+      logger: (m) => {
+        if (m.status === 'recognizing text') onProgress(Math.round(m.progress * 100));
+      },
+    });
+    try {
+      const { data } = await worker.recognize(image);
+      return data.text;
+    } finally {
+      worker.terminate();
+    }
+  }
+
+  // Articles du ticket : pour chacun, « nous deux », « rien que pour a » ou « pour b ».
+  function receiptForm(receipt, base) {
+    const items = receipt.items;
+    const who = (i) => `
+      <div class="seg seg-sm">
+        ${[['ab', '👥'], ['a', name('a')], ['b', name('b')]]
+          .map(([v, l]) => `<label><input type="radio" name="w${i}" value="${v}" ${v === 'ab' ? 'checked' : ''}><span>${v === 'ab' ? l : `<i class="dot ${v}"></i>${esc(l)}`}</span></label>`)
+          .join('')}
+      </div>`;
+    openModal(
+      '🧾 Ticket de caisse',
+      `
+      <label class="field"><span>Total du ticket</span>
+        <input class="big" name="total" inputmode="decimal" value="${amountValue(receipt.total)}" placeholder="0 €" required autocomplete="off">
+      </label>
+      ${
+        items.length
+          ? `<p class="hint" style="margin-top:0">Par défaut tout est partagé. Touchez le prénom pour ce qui n'est que pour l'un de vous (shampoing, dessert…).</p>
+             <div class="receipt-items">
+               ${items
+                 .map(
+                   (it, i) => `
+                 <div class="receipt-item">
+                   <div class="receipt-line"><span class="label">${esc(it.label)}</span><b class="num">${euro(it.amount)}</b></div>
+                   ${who(i)}
+                 </div>`
+                 )
+                 .join('')}
+             </div>`
+          : '<p class="hint">Aucun article lu sur la photo : vérifiez le total, il sera partagé comme d\'habitude.</p>'
+      }
+      <p class="hint" data-receipt-sum></p>`,
+      {
+        submitLabel: 'Continuer',
+        onOpen: (form) => {
+          const sync = () => {
+            const total = L.parseAmount(form.total.value);
+            const ex = L.receiptExtras(items, items.map((_, i) => form[`w${i}`].value));
+            const out = form.querySelector('[data-receipt-sum]');
+            if (!(total > 0)) return (out.innerHTML = '⚠️ Total invalide');
+            if (ex.extraA + ex.extraB > total) return (out.innerHTML = '⚠️ Plus que le total du ticket');
+            const sh = L.sharesOf({ amount: total, split: S.state.defaultSplit, ...ex });
+            out.innerHTML = `Partagé ${euro(total - ex.extraA - ex.extraB)}${ex.extraA ? ` · rien que ${esc(name('a'))} ${euro(ex.extraA)}` : ''}${ex.extraB ? ` · rien que ${esc(name('b'))} ${euro(ex.extraB)}` : ''}<br>Au total : ${esc(name('a'))} <b>${euro(sh.a)}</b> · ${esc(name('b'))} <b>${euro(sh.b)}</b>`;
+          };
+          form.querySelectorAll('input').forEach((i) => i.addEventListener(i.type === 'radio' ? 'change' : 'input', sync));
+          sync();
+        },
+        onSubmit: async (form) => {
+          const total = L.parseAmount(form.total.value);
+          if (!(total > 0)) return fail(form, 'Total invalide');
+          const ex = L.receiptExtras(items, items.map((_, i) => form[`w${i}`].value));
+          if (ex.extraA + ex.extraB > total) return fail(form, 'Les articles « rien que pour » dépassent le total');
+          modal.close();
+          const courses = sortedCategories().find((c) => c.name === 'Courses');
+          expenseForm(null, { label: 'Courses', categoryId: base.categoryId || (courses && courses.id), amount: total, ...ex });
+          return false;
+        },
       }
     );
   }

@@ -405,6 +405,53 @@
     };
   }
 
+  // Lecture d'un ticket de caisse (texte reconnu sur la photo) : les lignes
+  // « article ... 1,99 », et le total (ligne TOTAL / À PAYER, sinon le plus
+  // grand montant). Les lignes de paiement, TVA, rendu… ne sont pas des articles.
+  const RECEIPT_TOTAL = /\b(total|a payer|net a payer|montant du|montant ttc|ttc)\b/;
+  const RECEIPT_SKIP = /\b(sous[- ]?total|total|a payer|cb|carte|visa|mastercard|especes|rendu|monnaie|tva|ht|ttc|montant|paiement|paye|regle|credit|debit|avoir|fidelite|cagnotte|ticket|merci|siret|tel|date|heure|caisse|transaction|aut|contactless|sans contact)\b/;
+  function parseReceipt(text) {
+    const items = [];
+    const totals = [];
+    const amounts = [];
+    for (const raw of String(text || '').split(/\r?\n/)) {
+      const line = raw.replace(/\s+/g, ' ').trim();
+      // Montant en fin de ligne : 1,99 / 12.50 / -0,60 / 3,20 € / 4,15 A (code TVA).
+      const m = line.match(/(-?\s?\d{1,4}[,.]\s?\d{2})\s*(?:€|eur|euros?)?\s*[a-z0-9*]?\s*$/i);
+      if (!m) continue;
+      const amount = Math.round(parseFloat(m[1].replace(/\s/g, '').replace(',', '.')) * 100);
+      if (!Number.isFinite(amount) || amount === 0) continue;
+      const label = line
+        .slice(0, m.index)
+        .replace(/\b\d+\s*[x*]\s*\d+[,.]\d{2}\b/gi, '') // « 2 x 1,50 »
+        .replace(/[€*]+/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const key = normalizeLabel(label);
+      if (amount > 0) amounts.push(amount);
+      if (RECEIPT_TOTAL.test(key) && !/sous ?total/.test(key)) {
+        if (amount > 0) totals.push(amount);
+        continue;
+      }
+      if (RECEIPT_SKIP.test(key) || !/[a-z]{2}/.test(key)) continue;
+      items.push({ label, amount });
+    }
+    const total = totals.length ? Math.max(...totals) : amounts.length ? Math.max(...amounts) : 0;
+    return { total, items: items.filter((it) => it.amount <= total) };
+  }
+
+  // Répartition d'un ticket : chaque article est pour les deux ('ab'), pour 'a'
+  // ou pour 'b'. Renvoie les montants « rien que pour » de la dépense ; le reste
+  // (articles partagés, remises, lignes non lues) est partagé.
+  function receiptExtras(items, assign) {
+    const extra = { a: 0, b: 0 };
+    items.forEach((it, i) => {
+      const who = assign[i];
+      if (who === 'a' || who === 'b') extra[who] += it.amount;
+    });
+    return { extraA: Math.max(0, extra.a), extraB: Math.max(0, extra.b) };
+  }
+
   // Répartition proportionnelle aux revenus (en % pour a), arrondie à l'unité.
   function splitFromIncomes(incomeA, incomeB) {
     const sum = incomeA + incomeB;
@@ -592,6 +639,8 @@
     monthSummary,
     recurringSummary,
     splitFromIncomes,
+    parseReceipt,
+    receiptExtras,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
