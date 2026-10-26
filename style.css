@@ -1323,3 +1323,39 @@ select.guessed {
   cursor: pointer;
   padding: 0;
 }
+
+/* ---------- Ticket de caisse ---------- */
+.scan-btn {
+  margin-bottom: 14px;
+}
+
+.receipt-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.receipt-item {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.receipt-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.receipt-line .label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.seg.seg-sm span {
+  padding: 6px 4px;
+  font-size: 0.85rem;
+}

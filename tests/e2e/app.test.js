@@ -295,3 +295,30 @@ test('analyse : vues couple, perso et totale', async () => {
   assert.deepEqual(page.errors, []);
   await context.close();
 });
+
+test('ticket de caisse : photo lue, articles attribués, dépense préremplie', async () => {
+  const { context, page } = await openApp(browser, url, { state: baseState() });
+  // Lecture simulée (Tesseract.js est chargé depuis le CDN dans l'appli).
+  await context.route('https://cdn.jsdelivr.net/npm/tesseract.js@*/**', (route) =>
+    route.fulfill({
+      contentType: 'text/javascript',
+      body: `window.Tesseract = { createWorker: async () => ({
+        recognize: async () => ({ data: { text: 'LAIT 1,15\\nSHAMPOING 4,29\\nDESSERT 2,35\\nTOTAL 7,79\\nCB 7,79' } }),
+        terminate: async () => {},
+      }) };`,
+    })
+  );
+  await page.click('#tabs .fab');
+  await page.setInputFiles('[data-scan-file]', { name: 'ticket.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') });
+  await page.waitForSelector('.receipt-item');
+  assert.equal(await page.inputValue('#modal [name=total]'), '7,79');
+  await page.click('.receipt-item:nth-child(2) .seg label:has(input[value=a]) span');
+  await page.click('.receipt-item:nth-child(3) .seg label:has(input[value=b]) span');
+  assert.match(await text(page, '[data-receipt-sum]'), /Maxime 4,87 € · Lola 2,92 €/);
+  await page.click('#modal button[type=submit]');
+  assert.equal(await page.inputValue('#modal [name=amount]'), '7,79');
+  await page.click('#modal button[type=submit]');
+  assert.match(await text(page, '.balance'), /Lola doit à Maxime 2,92 €/);
+  assert.deepEqual(page.errors, []);
+  await context.close();
+});
