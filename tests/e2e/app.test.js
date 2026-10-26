@@ -158,15 +158,23 @@ test('projet d\'épargne : versements et progression', async () => {
   await context.close();
 });
 
-test('accueil : fixes masquées par défaut, réaffichables', async () => {
+test('charges fixes : seulement dans l\'onglet Fixes, mais comptées dans le solde', async () => {
   const state = baseState({
-    expenses: [e('1', 'Courses', 3380)],
+    expenses: [e('1', 'Courses', 3380, { date: new Date().toISOString().slice(0, 10) })],
     recurring: [{ id: 'l', label: 'Loyer', amount: 102400, payer: 'a', categoryId: null, split: 50, day: 1, startMonth: '2026-01', endMonth: null }],
   });
   const { context, page } = await openApp(browser, url, { state });
-  assert.match(await text(page, '.stats .stat'), /Dépensé \(hors fixes\)/);
-  await page.click('[data-hide-fixed-home]');
-  assert.doesNotMatch(await text(page, '.stats .stat'), /hors fixes/);
+  assert.match(await text(page, '.stats .stat'), /Dépensé ?33,80 €/);
+  assert.match(await text(page, '.balance'), /Lola doit à Maxime/);
+  assert.doesNotMatch(await text(page, '.balance'), /16,90 €/); // le loyer compte dans le solde
+  await page.click('[data-tab=expenses]');
+  assert.doesNotMatch(await text(page, '#view'), /Loyer/);
+  await page.click('[data-tab=budget]');
+  assert.match(await text(page, '.stats .stat'), /Dépensé ?33,80 €/);
+  assert.doesNotMatch(await text(page, '#view'), /Charges fixes/);
+  await page.click('[data-tab=fixed]');
+  assert.match(await text(page, '#view'), /1 024 €/);
+  assert.deepEqual(page.errors, []);
   await context.close();
 });
 
