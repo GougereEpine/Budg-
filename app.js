@@ -1840,15 +1840,6 @@
 
       ${an.alerts.length ? `<h2>Alertes</h2>${an.alerts.map(alertHtml).join('')}` : ''}
       ${carCard(ui.month)}
-      ${goalsSection()}
-
-      <h2>Budgets par catégorie</h2>
-      <div class="card" style="padding-top:4px;padding-bottom:4px">
-        ${budgeted.length ? budgeted.map(row).join('') : '<div class="empty">Aucun budget défini.<br>Touchez ✏️ pour en créer (ex. Courses 400 €).</div>'}
-      </div>
-      ${annual.length ? `<h2>Budgets annuels</h2><div class="card" style="padding-top:4px;padding-bottom:4px">${annual.map(row).join('')}</div>` : ''}
-      ${unbudgeted.length ? `<h2>Dépenses sans budget</h2><div class="card" style="padding-top:4px;padding-bottom:4px">${unbudgeted.map(row).join('')}</div>` : ''}
-
       <h2>Évolution</h2>
       <div class="card">
         <div class="list-head" style="margin:0 0 8px">
@@ -1860,6 +1851,15 @@
         </div>
         <div class="history">${historyHtml}</div>
       </div>
+
+      ${goalsSection()}
+
+      <h2>Budgets par catégorie</h2>
+      <div class="card" style="padding-top:4px;padding-bottom:4px">
+        ${budgeted.length ? budgeted.map(row).join('') : '<div class="empty">Aucun budget défini.<br>Touchez ✏️ pour en créer (ex. Courses 400 €).</div>'}
+      </div>
+      ${annual.length ? `<h2>Budgets annuels</h2><div class="card" style="padding-top:4px;padding-bottom:4px">${annual.map(row).join('')}</div>` : ''}
+      ${unbudgeted.length ? `<h2>Dépenses sans budget</h2><div class="card" style="padding-top:4px;padding-bottom:4px">${unbudgeted.map(row).join('')}</div>` : ''}
 
       <h2>Qui paie quoi</h2>
       <div class="card">
@@ -2397,7 +2397,7 @@
       state === 'off'
         ? '<button class="btn primary" data-notif="on">🔔 Activer sur cet appareil</button>'
         : state === 'on'
-          ? '<button class="btn" data-notif="test">Envoyer un test</button><button class="btn" data-notif="monthly">📊 Bilan du mois dernier</button><button class="btn danger" data-notif="off">Désactiver</button>'
+          ? '<button class="btn" data-notif="monthly">📊 Bilan du mois dernier</button><button class="btn danger" data-notif="off">Désactiver</button>'
           : '';
   }
 
