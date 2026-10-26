@@ -727,8 +727,8 @@
     const items = receipt.items;
     const who = (i) => `
       <div class="seg seg-sm">
-        ${[['ab', '👥'], ['a', name('a')], ['b', name('b')]]
-          .map(([v, l]) => `<label><input type="radio" name="w${i}" value="${v}" ${v === 'ab' ? 'checked' : ''}><span>${v === 'ab' ? l : `<i class="dot ${v}"></i>${esc(l)}`}</span></label>`)
+        ${[['ab', '👥'], ['a', name('a')], ['b', name('b')], ['x', '✕']]
+          .map(([v, l]) => `<label class="${v === 'x' ? 'skip' : ''}"><input type="radio" name="w${i}" value="${v}" ${v === 'ab' ? 'checked' : ''} aria-label="${v === 'x' ? 'Ne pas compter' : ''}"><span>${v === 'a' || v === 'b' ? `<i class="dot ${v}"></i>${esc(l)}` : l}</span></label>`)
           .join('')}
       </div>`;
     openModal(
@@ -739,12 +739,12 @@
       </label>
       ${
         items.length
-          ? `<p class="hint" style="margin-top:0">Par défaut tout est partagé. Touchez le prénom pour ce qui n'est que pour l'un de vous (shampoing, dessert…).</p>
+          ? `<p class="hint" style="margin-top:0">Par défaut tout est partagé. Touchez le prénom pour ce qui n'est que pour l'un de vous (shampoing, dessert…), ou ✕ pour ne pas le compter (pourboire, ligne mal lue…) : il est retiré du total.</p>
              <div class="receipt-items">
                ${items
                  .map(
                    (it, i) => `
-                 <div class="receipt-item">
+                 <div class="receipt-item" data-item="${i}">
                    <div class="receipt-line"><span class="label">${esc(it.label)}</span><b class="num">${euro(it.amount)}</b></div>
                    ${who(i)}
                  </div>`
@@ -758,21 +758,22 @@
         submitLabel: 'Continuer',
         onOpen: (form) => {
           const sync = () => {
-            const total = L.parseAmount(form.total.value);
             const ex = L.receiptExtras(items, items.map((_, i) => form[`w${i}`].value));
+            form.querySelectorAll('[data-item]').forEach((el) => el.classList.toggle('skipped', form[`w${el.dataset.item}`].value === 'x'));
+            const total = L.parseAmount(form.total.value) - ex.removed;
             const out = form.querySelector('[data-receipt-sum]');
             if (!(total > 0)) return (out.innerHTML = '⚠️ Total invalide');
             if (ex.extraA + ex.extraB > total) return (out.innerHTML = '⚠️ Plus que le total du ticket');
             const sh = L.sharesOf({ amount: total, split: S.state.defaultSplit, ...ex });
-            out.innerHTML = `Partagé ${euro(total - ex.extraA - ex.extraB)}${ex.extraA ? ` · rien que ${esc(name('a'))} ${euro(ex.extraA)}` : ''}${ex.extraB ? ` · rien que ${esc(name('b'))} ${euro(ex.extraB)}` : ''}<br>Au total : ${esc(name('a'))} <b>${euro(sh.a)}</b> · ${esc(name('b'))} <b>${euro(sh.b)}</b>`;
+            out.innerHTML = `${ex.removed ? `Retiré ${euro(ex.removed)} · <b>dépense ${euro(total)}</b><br>` : ''}Partagé ${euro(total - ex.extraA - ex.extraB)}${ex.extraA ? ` · rien que ${esc(name('a'))} ${euro(ex.extraA)}` : ''}${ex.extraB ? ` · rien que ${esc(name('b'))} ${euro(ex.extraB)}` : ''}<br>Au total : ${esc(name('a'))} <b>${euro(sh.a)}</b> · ${esc(name('b'))} <b>${euro(sh.b)}</b>`;
           };
           form.querySelectorAll('input').forEach((i) => i.addEventListener(i.type === 'radio' ? 'change' : 'input', sync));
           sync();
         },
         onSubmit: async (form) => {
-          const total = L.parseAmount(form.total.value);
+          const { removed, ...ex } = L.receiptExtras(items, items.map((_, i) => form[`w${i}`].value));
+          const total = L.parseAmount(form.total.value) - removed;
           if (!(total > 0)) return fail(form, 'Total invalide');
-          const ex = L.receiptExtras(items, items.map((_, i) => form[`w${i}`].value));
           if (ex.extraA + ex.extraB > total) return fail(form, 'Les articles « rien que pour » dépassent le total');
           modal.close();
           const courses = sortedCategories().find((c) => c.name === 'Courses');

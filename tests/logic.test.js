@@ -497,7 +497,8 @@ RENDU                   0,00`;
   // Sans ligne TOTAL lisible : le plus grand montant.
   assert.equal(L.parseReceipt('Pommes 2,10\nBiere 7,90\n10,00').total, 1000);
   // Shampoing pour a, dessert pour b : le reste est partagé.
-  assert.deepEqual(L.receiptExtras(r.items, ['ab', 'ab', 'a', 'b']), { extraA: 429, extraB: 235 });
+  assert.deepEqual(L.receiptExtras(r.items, ['ab', 'ab', 'a', 'b']), { extraA: 429, extraB: 235, removed: 0 });
+  assert.deepEqual(L.receiptExtras(r.items, ['x', 'ab', 'a', 'ab']), { extraA: 429, extraB: 0, removed: 115 });
 });
 
 test('ticket de caisse : vraie photo de restaurant (texte tel que lu par Tesseract)', () => {
@@ -529,4 +530,24 @@ EU. SOLDE 111.00€
     ['BALLE DE MATCH', 500],
   ]);
   assert.equal(r.items.reduce((s, i) => s + i.amount, 0), r.total);
+});
+
+test('ticket de caisse : ticket anglais (SUBTOTAL, pourboire, total collé à un symbole)', () => {
+  const text = `ZIZZI
+CHK# 149 TBL# 46
+2 Chorizo Carbonara 37.00
+1 Draught Guinness 10.50
+SUBTOTAL: 220.25
+OPTIONAL Team Tip 22.03
+TOTAL: Ç242.28
+Sales-VAT VAT Rate VAT Amt Total
+150.04 13.50% 20.26 170.30
+Food excl Set Menus 159.80`;
+  const r = L.parseReceipt(text);
+  assert.equal(r.total, 24228);
+  assert.deepEqual(r.items.map((i) => [i.label, i.amount]), [
+    ['2 × Chorizo Carbonara', 3700],
+    ['Draught Guinness', 1050],
+    ['OPTIONAL Team Tip', 2203],
+  ]);
 });

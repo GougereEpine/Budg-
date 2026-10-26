@@ -1364,3 +1364,12 @@ select.guessed {
   padding: 6px 4px;
   font-size: 0.85rem;
 }
+
+.seg.seg-sm label.skip {
+  flex: 0 0 44px;
+}
+
+.receipt-item.skipped .receipt-line {
+  opacity: 0.45;
+  text-decoration: line-through;
+}

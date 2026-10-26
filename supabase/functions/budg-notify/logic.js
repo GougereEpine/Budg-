@@ -408,12 +408,13 @@
   // Lecture d'un ticket de caisse (texte reconnu sur la photo) : les lignes
   // « article ... 1,99 », et le total (ligne TOTAL / SOLDE / À PAYER, sinon le
   // plus grand montant). Les lignes de paiement, TVA, rendu… ne sont pas des articles.
-  const RECEIPT_TOTAL = /\b(total|solde|a payer|net a payer|montant du|montant ttc|ttc)\b/;
-  const RECEIPT_SKIP = /\b(sous ?total|total|solde|a payer|cb|carte|visa|mastercard|especes|rendu|monnaie|tva|htva|ht|ttc|taux|montant|paiement|paye|regle|credit|debit|avoir|fidelite|cagnotte|ticket|merci|siret|tel|date|heure|caisse|transaction|aut|contactless|sans contact|pieces|articles|table|serv)\b/;
+  const RECEIPT_TOTAL = /\b(total|solde|a payer|net a payer|montant du|montant ttc|ttc|amount due|balance due|grand total)\b/;
+  const RECEIPT_SUBTOTAL = /\b(sous ?total|sub ?total)\b/;
+  const RECEIPT_SKIP = /\b(sous ?total|sub ?total|total|solde|a payer|cb|carte|visa|mastercard|especes|rendu|monnaie|tva|htva|ht|ttc|taux|montant|paiement|paye|regle|credit|debit|avoir|fidelite|cagnotte|ticket|merci|siret|tel|date|heure|caisse|transaction|aut|contactless|sans contact|pieces|articles|table|serv|vat|sales|rate|amt|change|cash|card|guests|chk|tbl|excl|balance)\b/;
   // Montant en fin de ligne (1,99 / 12.50 / -0,60), suivi éventuellement du
   // symbole € (souvent lu « e » ou « £ ») et d'un code TVA (A, B, « À »…).
   // Les chiffres mal lus en lettres (B pour 8, O pour 0…) sont corrigés.
-  const RECEIPT_AMOUNT = /(?:^|\s)(-?\s?[\dBOoSIl]{1,4}[,.]\s?\d{2})(?:\s*(?:€|eur|euros?|e|£|c))?(?:\s*[^\s\d]{1,2})?\s*$/i;
+  const RECEIPT_AMOUNT = /(?:^|\s)[€£$Ç]?(-?\s?[\dBOoSIl]{1,4}[,.]\s?\d{2})(?:\s*(?:€|eur|euros?|e|£|c))?(?:\s*[^\s\d]{1,2})?\s*$/i;
   const OCR_DIGITS = { B: '8', O: '0', o: '0', S: '5', I: '1', l: '1' };
   function parseReceipt(text) {
     const items = [];
@@ -431,7 +432,7 @@
       const key = normalizeLabel(before);
       // Ligne de tableau (TVA…) : plusieurs montants sur la même ligne.
       const table = (before.match(/\d[,.]\d{2}/g) || []).length >= 1;
-      if (RECEIPT_TOTAL.test(key) && !/sous ?total/.test(key)) {
+      if (RECEIPT_TOTAL.test(key) && !RECEIPT_SUBTOTAL.test(key)) {
         if (amount > 0) totals.push(amount);
         afterTotal = true;
         continue;
@@ -449,16 +450,17 @@
     return { total, items: items.filter((it) => it.amount <= total) };
   }
 
-  // Répartition d'un ticket : chaque article est pour les deux ('ab'), pour 'a'
-  // ou pour 'b'. Renvoie les montants « rien que pour » de la dépense ; le reste
-  // (articles partagés, remises, lignes non lues) est partagé.
+  // Répartition d'un ticket : chaque article est pour les deux ('ab'), pour 'a',
+  // pour 'b', ou retiré ('x', ex. le pourboire). Renvoie les montants « rien que
+  // pour » de la dépense et le montant retiré du total ; le reste (articles
+  // partagés, remises, lignes non lues) est partagé.
   function receiptExtras(items, assign) {
-    const extra = { a: 0, b: 0 };
+    const extra = { a: 0, b: 0, x: 0 };
     items.forEach((it, i) => {
       const who = assign[i];
-      if (who === 'a' || who === 'b') extra[who] += it.amount;
+      if (who === 'a' || who === 'b' || who === 'x') extra[who] += it.amount;
     });
-    return { extraA: Math.max(0, extra.a), extraB: Math.max(0, extra.b) };
+    return { extraA: Math.max(0, extra.a), extraB: Math.max(0, extra.b), removed: Math.max(0, extra.x) };
   }
 
   // Répartition proportionnelle aux revenus (en % pour a), arrondie à l'unité.
