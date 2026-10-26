@@ -597,3 +597,14 @@ CARTE 64,31`;
   assert.equal(r.total, 6431);
   assert.deepEqual(r.items.map((i) => i.label), ['2 × SAUMON FUME NORVES', 'par FINE RECTANGU 7', '7E0FEULLEEEZO']);
 });
+
+test('ticket de caisse : deux articles au même prix ne font pas un total', () => {
+  const text = `PINS 3008 3,15 EUR 9.45 EUR
+COURGETTE 4.19 EUR
+2 X SAUMON FUME NORVEG 6.00 EUR 12.00 EUR
+2 X TEO FEUILLETEE 1.89 EUR 3.78 EUR
+2 X TEO BRISEE 1.89 EUR 3.78 EUR`;
+  const r = L.parseReceipt([text]);
+  assert.equal(r.total, 945 + 419 + 1200 + 378 + 378);
+  assert.equal(r.items.length, 5);
+});
