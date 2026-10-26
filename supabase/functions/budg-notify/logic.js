@@ -96,6 +96,13 @@
     return (list || []).filter((x) => !x.owner);
   }
 
+  // Sans les charges fixes ni les remboursements automatiques : ce qu'on affiche
+  // et analyse partout sauf dans l'onglet Fixes. Le solde du couple, lui, les
+  // compte toujours (computeBalance sur l'état complet).
+  function withoutFixed(state) {
+    return { ...state, recurring: [], recurringTransfers: [] };
+  }
+
   // Vue « perso » de `p`, au même format que l'état du couple : ses dépenses et
   // abonnements perso (entièrement à sa charge), ses catégories perso et celles
   // du couple (sans budget). Les calculs habituels s'y appliquent tels quels.
@@ -621,6 +628,7 @@
   const api = {
     analyzeMonth,
     shared,
+    withoutFixed,
     personalState,
     personalTotal,
     totalState,

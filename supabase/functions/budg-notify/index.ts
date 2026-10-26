@@ -189,7 +189,8 @@ async function monthlyMessage(hid: string) {
   const cur = today.slice(0, 7);
   const prev = L.addMonths(cur, -1);
   const lastDay = `${prev}-${pad(L.daysInMonth(prev))}`;
-  const an = L.analyzeMonth(state, prev, lastDay);
+  // Dépenses hors charges fixes (comme dans l'appli) ; le solde, lui, les compte.
+  const an = L.analyzeMonth(L.withoutFixed(state), prev, lastDay);
   const bal = L.computeBalance(state, cur);
   const names: Record<string, string> = { a: state.people[0].name, b: state.people[1].name };
 

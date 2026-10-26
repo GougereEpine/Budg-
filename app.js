@@ -18,9 +18,6 @@
     filter: 'all',
     search: '',
     openFixedGroups: new Set(), // catégories dépliées dans l'onglet Fixes
-    hideFixed: readPref('budg-hide-fixed') === '1',
-    // Accueil : charges fixes masquées par défaut (réglage séparé).
-    hideFixedHome: readPref('budg-hide-fixed-home') !== '0',
     persoOf: null, // espace perso affiché ('a' ou 'b'), par défaut le sien
     scope: 'couple', // Analyse : 'couple', 'perso' ou 'total' (sa part du couple + son perso)
   };
@@ -1313,8 +1310,10 @@
   }
 
   // « Qui a payé » d'un mois, virements compris, comparé à la part de chacun.
-  function whoPaidHtml(month, hide = ui.hideFixed) {
-    const c = L.monthContributions(S.state, month, { variableOnly: hide });
+  // Hors charges fixes et remboursements automatiques (ils ont leur onglet).
+  function whoPaidHtml(month) {
+    const hide = true;
+    const c = L.monthContributions(S.state, month, { variableOnly: true });
     if (!c.paid.a && !c.paid.b && !c.given.a && !c.given.b) return '<div class="empty">Rien ce mois-ci.</div>';
     const pos = { a: Math.max(0, c.funded.a), b: Math.max(0, c.funded.b) };
     const transfers = ['a', 'b']
@@ -1575,7 +1574,7 @@
     const state = S.state;
     const cur = currentMonth();
     const bal = L.computeBalance(state, cur);
-    const an = L.analyzeMonth(state, cur, today());
+    const an = L.analyzeMonth(L.withoutFixed(state), cur, today());
 
     const balanceHtml =
       bal.amount === 0
@@ -1597,11 +1596,9 @@
       alertsHtml += `<button class="btn link" data-goto="budget">+ ${an.alerts.length - 3} autre(s) alerte(s) →</button>`;
     }
 
-    // « Masquer les fixes » : on ne compte que les dépenses ponctuelles.
-    const spentKey = ui.hideFixedHome ? 'variable' : 'total';
-    const prev = an.history.slice(0, -1).filter((h) => h[spentKey] > 0);
-    const spentNow = an.history[an.history.length - 1][spentKey];
-    const avg = prev.length ? prev.reduce((sum, h) => sum + h[spentKey], 0) / prev.length : null;
+    const prev = an.history.slice(0, -1).filter((h) => h.total > 0);
+    const spentNow = an.total;
+    const avg = prev.length ? prev.reduce((sum, h) => sum + h.total, 0) / prev.length : null;
     const vsAvg = avg ? Math.round(((spentNow - avg) / avg) * 100) : null;
     const delta =
       vsAvg == null
@@ -1630,16 +1627,15 @@
       ${carReminder(cur)}
       ${alertsHtml ? `<h2>Alertes de ${monthLabel(cur, true)}</h2>${alertsHtml}` : ''}
       ${notifSuggestion()}
-      <div class="topbar"><h2>Ce mois-ci</h2>
-        <button class="chip ${ui.hideFixedHome ? 'active' : ''}" data-hide-fixed-home aria-pressed="${ui.hideFixedHome}">🔁 ${ui.hideFixedHome ? 'Fixes masquées' : 'Masquer les fixes'}</button></div>
+      <h2>Ce mois-ci</h2>
       <div class="stats">
-        <div class="stat"><div class="label">${ui.hideFixedHome ? 'Dépensé (hors fixes)' : 'Dépensé'}</div><div class="value num">${euro(spentNow)}</div><div class="delta">${delta}</div></div>
+        <div class="stat"><div class="label">Dépensé</div><div class="value num">${euro(spentNow)}</div><div class="delta">${delta}</div></div>
         <div class="stat"><div class="label">Budgets</div>
           <div class="value num">${an.budgetPct == null ? '—' : an.budgetPct + ' %'}</div>
           <div class="delta muted">${an.budgetTotal ? `${euro(an.budgetSpent)} / ${euro(an.budgetTotal)}` : 'aucun budget défini'}</div></div>
       </div>
       <div class="card">
-        ${whoPaidHtml(cur, ui.hideFixedHome)}
+        ${whoPaidHtml(cur)}
       </div>
       <div class="topbar"><h2>Dernières dépenses</h2>
         ${shared.length + mine.length > 3 ? '<button class="btn link" data-goto="expenses">Tout voir ›</button>' : ''}</div>
@@ -1686,11 +1682,11 @@
       fields.some((f) => f && normalize(f).includes(q)) || (Number.isFinite(cents) && cents > 0 && Math.abs(amount) === cents);
 
     const upTo = currentMonth() > ui.month ? currentMonth() : ui.month;
-    let items = L.allExpenses(state, upTo)
+    let items = L.allExpenses(L.withoutFixed(state), upTo)
       .filter((e) => matches([e.label, category(e.categoryId).name, name(e.payer)], e.amount))
       .map((e) => ({ kind: 'e', date: e.date, data: e }));
     items = items.concat(
-      L.allTransfers(state, upTo)
+      L.allTransfers(L.withoutFixed(state), upTo)
         .filter((t) => matches(['remboursement', t.note, name(t.from), name(t.to)], t.amount))
         .map((t) => ({ kind: 't', date: t.date, data: t }))
     );
@@ -1728,8 +1724,9 @@
   function renderExpenses() {
     if (ui.search.trim()) return renderSearch();
     const state = S.state;
-    const expenses = L.monthExpenses(state, ui.month);
-    const transfers = L.allTransfers(state, ui.month).filter((t) => L.monthKey(t.date) === ui.month);
+    // Les charges fixes et remboursements automatiques ont leur onglet.
+    const expenses = L.monthExpenses(L.withoutFixed(state), ui.month);
+    const transfers = L.allTransfers(L.withoutFixed(state), ui.month).filter((t) => L.monthKey(t.date) === ui.month);
 
     let items = expenses.map((e) => ({ kind: 'e', date: e.date, data: e }));
     items = items.concat(transfers.map((t) => ({ kind: 't', date: t.date, data: t })));
@@ -1738,14 +1735,9 @@
       if (f === 'all') return true;
       if (f === 'transfers') return it.kind === 't';
       if (it.kind === 't') return false;
-      if (f === 'fixed') return Boolean(it.data.recurringId);
       if (f === 'a' || f === 'b') return it.data.payer === f;
       return it.data.categoryId === f;
     });
-    // « Masquer les fixes » : on ne garde que les opérations saisies à la main.
-    if (ui.hideFixed && f !== 'fixed') {
-      items = items.filter((it) => !it.data.recurringId && !it.data.recurringTransferId);
-    }
     items.sort((x, y) => (x.date === y.date ? 0 : x.date < y.date ? 1 : -1));
 
     const total = items.filter((it) => it.kind === 'e').reduce((s, it) => s + it.data.amount, 0);
@@ -1755,7 +1747,6 @@
       ['all', 'Tout'],
       ['a', name('a')],
       ['b', name('b')],
-      ['fixed', '🔁 Fixes'],
       ['transfers', '💸 Remboursements'],
       ...sortedCategories()
         .filter((c) => usedCats.has(c.id))
@@ -1782,19 +1773,11 @@
       <div class="chips">
         ${chips.map(([v, l]) => `<button class="chip ${f === v ? 'active' : ''}" data-filter="${esc(v)}">${esc(l)}</button>`).join('')}
       </div>
-      <div class="list-head">
-        <p class="muted small">${items.length} opération(s) · total dépenses <b class="num">${euro(total)}</b></p>
-        <button class="chip ${ui.hideFixed ? 'active' : ''}" data-hide-fixed aria-pressed="${ui.hideFixed}">🔁 ${ui.hideFixed ? 'Fixes masquées' : 'Masquer les fixes'}</button>
-      </div>
+      <p class="muted small" style="margin:4px 4px 0">${items.length} opération(s) · total dépenses <b class="num">${euro(total)}</b> · charges fixes dans l'onglet Fixes</p>
       ${html || '<div class="card empty">Rien ce mois-ci.</div>'}`;
 
     bindSearchBox();
     view.querySelector('[data-add-transfer]').onclick = () => transferForm(null);
-    view.querySelector('[data-hide-fixed]').onclick = () => {
-      ui.hideFixed = !ui.hideFixed;
-      writePref('budg-hide-fixed', ui.hideFixed ? '1' : '0');
-      render();
-    };
   }
 
   // Charges fixes regroupées par catégorie : une ligne résumé (total, part de
@@ -1990,7 +1973,9 @@
     const p = persoOf();
     const scope = ui.scope;
     const couple = scope === 'couple';
-    const state = couple ? S.state : scope === 'perso' ? L.personalState(S.state, p) : L.totalState(S.state, p, ui.month);
+    // Hors charges fixes : elles ont leur onglet.
+    const base = L.withoutFixed(S.state);
+    const state = couple ? base : scope === 'perso' ? L.personalState(base, p) : L.totalState(base, p, ui.month);
     const an = L.analyzeMonth(state, ui.month, today());
     // Seules les catégories du couple (vue Couple) et les catégories perso (autres vues) ont un budget modifiable ici.
     const catAttr = (c) => (couple ? `data-category="${c.id}"` : c.personal && (S.mode !== 'cloud' || p === me()) ? `data-perso-cat="${c.id}"` : '');
@@ -2072,20 +2057,15 @@
         </div>`;
     };
 
-    // Barres empilées : charges fixes en bas, dépenses ponctuelles au-dessus.
-    // « Masquer les fixes » (même réglage que l'onglet Dépenses) ne garde que les ponctuelles.
-    const shown = (h) => (ui.hideFixed ? h.variable : h.total);
-    const max = Math.max(1, ...an.history.map(shown));
+    const max = Math.max(1, ...an.history.map((h) => h.total));
     const historyHtml = an.history
       .map((h) => {
-        const fixedPart = ui.hideFixed ? 0 : h.fixed;
-        const title = `${monthLabel(h.month)} : ${euro(h.variable)} ponctuelles${ui.hideFixed ? '' : ` + ${euro(h.fixed)} fixes`}`;
+        const title = `${monthLabel(h.month)} : ${euro(h.total)}`;
         return `
         <div class="col ${h.month === ui.month ? 'current' : ''}" title="${esc(title)}">
-          <span class="val num">${shown(h) ? euro(Math.round(shown(h) / 100) * 100) : ''}</span>
-          <div class="stack" style="height:${(shown(h) / max) * 100}%">
-            ${h.variable ? `<div class="seg-var" style="flex:${h.variable}"></div>` : ''}
-            ${fixedPart ? `<div class="seg-fixed" style="flex:${fixedPart}"></div>` : ''}
+          <span class="val num">${h.total ? euro(Math.round(h.total / 100) * 100) : ''}</span>
+          <div class="stack" style="height:${(Math.max(0, h.total) / max) * 100}%">
+            ${h.total > 0 ? `<div class="seg-var" style="flex:1"></div>` : ''}
           </div>
           <span class="m">${monthLabel(h.month, true)}</span>
         </div>`;
@@ -2113,22 +2093,12 @@
                  <div class="delta muted">au rythme actuel (${Math.round(an.progress * 100)} % du mois écoulé)</div></div>`
             : ''
         }
-        <div class="stat"><div class="label">Charges fixes</div>
-          <div class="value num">${euro(an.fixedTotal)}</div>
-          <div class="delta muted">incluses dans le total</div></div>
       </div>
 
       ${an.alerts.length ? `<h2>Alertes</h2>${an.alerts.map(alertHtml).join('')}` : ''}
       ${couple ? carCard(ui.month) : ''}
       <h2>Évolution</h2>
       <div class="card">
-        <div class="list-head" style="margin:0 0 8px">
-          <div class="legend" style="justify-content:flex-start;gap:14px">
-            <span><i class="dot" style="background:var(--accent)"></i>Ponctuelles</span>
-            ${ui.hideFixed ? '' : '<span><i class="dot" style="background:var(--fixed)"></i>Charges fixes</span>'}
-          </div>
-          <button class="chip ${ui.hideFixed ? 'active' : ''}" data-hide-fixed aria-pressed="${ui.hideFixed}">🔁 ${ui.hideFixed ? 'Fixes masquées' : 'Masquer les fixes'}</button>
-        </div>
         <div class="history">${historyHtml}</div>
       </div>
 
@@ -2164,12 +2134,6 @@
     });
     if (couple) bindCarCard(ui.month);
     view.querySelectorAll('[data-add-goal]').forEach((b) => (b.onclick = () => goalForm(null)));
-    view.querySelector('[data-hide-fixed]').onclick = () => {
-      ui.hideFixed = !ui.hideFixed;
-      writePref('budg-hide-fixed', ui.hideFixed ? '1' : '0');
-      render();
-    };
-
     view.querySelector('[data-edit-budgets]').onclick = () => {
       if (!couple) {
         ui.tab = 'perso';
@@ -2387,7 +2351,7 @@
 
   // Carte d'accès à l'espace perso, sur l'accueil.
   function persoCard(month) {
-    const t = L.personalTotal(S.state, me(), month);
+    const t = L.personalTotal(L.withoutFixed(S.state), me(), month);
     const sub = t.perso
       ? `${euro(t.perso)} ce mois-ci · ${euro(t.total)} avec le couple`
       : 'Tes dépenses à toi, hors du couple';
@@ -2433,15 +2397,12 @@
     const p = persoOf();
     // Hors ligne, un seul appareil pour deux : chacun peut modifier son perso.
     const mine = S.mode !== 'cloud' || p === me();
-    const ps = L.personalState(S.state, p);
+    // Hors charges fixes : les abonnements perso sont dans l'onglet Fixes.
+    const base = L.withoutFixed(S.state);
+    const ps = L.personalState(base, p);
     const an = L.analyzeMonth(ps, ui.month, today());
-    const t = L.personalTotal(S.state, p, ui.month);
-    const cur = currentMonth();
-    const subs = ps.recurring.filter((r) => r.startMonth <= cur && (!r.endMonth || r.endMonth >= cur)).sort((x, y) => y.amount - x.amount);
+    const t = L.personalTotal(base, p, ui.month);
     const budgets = an.categories.filter((c) => c.personal);
-    // Les abonnements ont leur propre liste : on ne les répète pas dans les dépenses du mois.
-    const oneOff = an.expenses.filter((e) => !e.recurringId);
-    const oneOffTotal = oneOff.reduce((sum, e) => sum + e.amount, 0);
 
     const budgetRow = (c) => {
       const spent = c.annual ? c.ytd : c.spent;
@@ -2461,13 +2422,6 @@
           <div class="small muted">${detail}</div>
         </div>`;
     };
-
-    const subItem = (r) => `
-      <div class="item" ${mine ? `data-recurring="${r.id}"` : ''}>
-        <div class="emoji">${esc(category(r.categoryId).icon)}</div>
-        <div class="body"><div class="title">${esc(r.label)}</div><div class="sub">${esc(category(r.categoryId).name)} · le ${r.day} du mois</div></div>
-        <div class="right"><div class="amt num">${euro(r.amount)}<span class="small muted">/mois</span></div></div>
-      </div>`;
 
     const add = (attr, label) => (mine ? `<button class="icon-btn" ${attr} aria-label="${label}">＋</button>` : '');
     view.innerHTML = `
@@ -2492,15 +2446,11 @@
       <div class="card">
         ${budgets.length ? budgets.map(budgetRow).join('') : `<div class="empty">${mine ? 'Sport, vêtements, sorties… : fixez-vous un budget, une alerte prévient en cas de dépassement.' : 'Aucun budget perso.'}</div>`}
       </div>
-      <div class="topbar"><h2>Abonnements perso</h2>${add('data-add-perso-sub', 'Ajouter un abonnement perso')}</div>
+      <div class="topbar"><h2>Dépenses du mois · ${euro(an.total)}</h2>${add('data-add-perso-exp', 'Ajouter une dépense perso')}</div>
       <div class="card list">
-        ${subs.length ? subs.map(subItem).join('') : `<div class="empty">${mine ? 'Téléphone, salle de sport, streaming…' : 'Aucun abonnement perso.'}</div>`}
+        ${an.expenses.length ? an.expenses.map((e) => expenseItem(e, !mine)).join('') : '<div class="empty">Rien ce mois-ci.</div>'}
       </div>
-      <div class="topbar"><h2>Dépenses du mois · ${euro(oneOffTotal)}</h2>${add('data-add-perso-exp', 'Ajouter une dépense perso')}</div>
-      <div class="card list">
-        ${oneOff.length ? oneOff.map((e) => expenseItem(e, !mine)).join('') : '<div class="empty">Rien ce mois-ci.</div>'}
-      </div>
-      <p class="hint" style="text-align:center">${mine ? `Hors du solde et des budgets du couple, sans notification. ${esc(name(other(p)))} peut les consulter ici.` : 'Consultation seule.'}</p>`;
+      <p class="hint" style="text-align:center">${mine ? `Hors du solde et des budgets du couple, sans notification. ${esc(name(other(p)))} peut les consulter ici. Charges fixes perso : onglet Fixes.` : 'Consultation seule.'}</p>`;
 
     view.querySelectorAll('[data-perso-of]').forEach((b) => {
       b.onclick = () => {
@@ -2510,7 +2460,6 @@
     });
     if (!mine) return;
     view.querySelector('[data-add-perso-cat]').onclick = () => persoCategoryForm(null, p);
-    view.querySelector('[data-add-perso-sub]').onclick = () => recurringForm(null, { owner: p });
     view.querySelector('[data-add-perso-exp]').onclick = () => expenseForm(null, { owner: p });
     view.querySelectorAll('[data-perso-cat]').forEach((el) => {
       el.onclick = () => {
@@ -2867,20 +2816,8 @@
   }
 
   document.addEventListener('click', async (ev) => {
-    const b = ev.target.closest('[data-notif],[data-hide-fixed],[data-hide-fixed-home]');
+    const b = ev.target.closest('[data-notif]');
     if (!b || !view.contains(b)) return;
-    if (b.dataset.hideFixedHome !== undefined) {
-      ui.hideFixedHome = !ui.hideFixedHome;
-      writePref('budg-hide-fixed-home', ui.hideFixedHome ? '1' : '0');
-      render();
-      return;
-    }
-    if (b.dataset.hideFixed !== undefined && !b.onclick) {
-      ui.hideFixed = !ui.hideFixed;
-      writePref('budg-hide-fixed', ui.hideFixed ? '1' : '0');
-      render();
-      return;
-    }
     const action = b.dataset.notif;
     if (!action) return;
     if (action === 'dismiss') {
