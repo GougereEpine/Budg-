@@ -406,35 +406,44 @@
   }
 
   // Lecture d'un ticket de caisse (texte reconnu sur la photo) : les lignes
-  // « article ... 1,99 », et le total (ligne TOTAL / À PAYER, sinon le plus
-  // grand montant). Les lignes de paiement, TVA, rendu… ne sont pas des articles.
-  const RECEIPT_TOTAL = /\b(total|a payer|net a payer|montant du|montant ttc|ttc)\b/;
-  const RECEIPT_SKIP = /\b(sous[- ]?total|total|a payer|cb|carte|visa|mastercard|especes|rendu|monnaie|tva|ht|ttc|montant|paiement|paye|regle|credit|debit|avoir|fidelite|cagnotte|ticket|merci|siret|tel|date|heure|caisse|transaction|aut|contactless|sans contact)\b/;
+  // « article ... 1,99 », et le total (ligne TOTAL / SOLDE / À PAYER, sinon le
+  // plus grand montant). Les lignes de paiement, TVA, rendu… ne sont pas des articles.
+  const RECEIPT_TOTAL = /\b(total|solde|a payer|net a payer|montant du|montant ttc|ttc)\b/;
+  const RECEIPT_SKIP = /\b(sous ?total|total|solde|a payer|cb|carte|visa|mastercard|especes|rendu|monnaie|tva|htva|ht|ttc|taux|montant|paiement|paye|regle|credit|debit|avoir|fidelite|cagnotte|ticket|merci|siret|tel|date|heure|caisse|transaction|aut|contactless|sans contact|pieces|articles|table|serv)\b/;
+  // Montant en fin de ligne (1,99 / 12.50 / -0,60), suivi éventuellement du
+  // symbole € (souvent lu « e » ou « £ ») et d'un code TVA (A, B, « À »…).
+  // Les chiffres mal lus en lettres (B pour 8, O pour 0…) sont corrigés.
+  const RECEIPT_AMOUNT = /(?:^|\s)(-?\s?[\dBOoSIl]{1,4}[,.]\s?\d{2})(?:\s*(?:€|eur|euros?|e|£|c))?(?:\s*[^\s\d]{1,2})?\s*$/i;
+  const OCR_DIGITS = { B: '8', O: '0', o: '0', S: '5', I: '1', l: '1' };
   function parseReceipt(text) {
     const items = [];
     const totals = [];
     const amounts = [];
+    let afterTotal = false;
     for (const raw of String(text || '').split(/\r?\n/)) {
       const line = raw.replace(/\s+/g, ' ').trim();
-      // Montant en fin de ligne : 1,99 / 12.50 / -0,60 / 3,20 € / 4,15 A (code TVA).
-      const m = line.match(/(-?\s?\d{1,4}[,.]\s?\d{2})\s*(?:€|eur|euros?)?\s*[a-z0-9*]?\s*$/i);
+      const m = line.match(RECEIPT_AMOUNT);
       if (!m) continue;
-      const amount = Math.round(parseFloat(m[1].replace(/\s/g, '').replace(',', '.')) * 100);
+      const digits = m[1].replace(/\s/g, '').replace(/[BOoSIl]/g, (c) => OCR_DIGITS[c]);
+      const amount = Math.round(parseFloat(digits.replace(',', '.')) * 100);
       if (!Number.isFinite(amount) || amount === 0) continue;
-      const label = line
-        .slice(0, m.index)
-        .replace(/\b\d+\s*[x*]\s*\d+[,.]\d{2}\b/gi, '') // « 2 x 1,50 »
-        .replace(/[€*]+/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      const key = normalizeLabel(label);
-      if (amount > 0) amounts.push(amount);
+      const before = line.slice(0, m.index).replace(/\b\d+\s*[x*]\s*\d+[,.]\d{2}\b/gi, ' '); // « 2 x 1,50 »
+      const key = normalizeLabel(before);
+      // Ligne de tableau (TVA…) : plusieurs montants sur la même ligne.
+      const table = (before.match(/\d[,.]\d{2}/g) || []).length >= 1;
       if (RECEIPT_TOTAL.test(key) && !/sous ?total/.test(key)) {
         if (amount > 0) totals.push(amount);
+        afterTotal = true;
         continue;
       }
-      if (RECEIPT_SKIP.test(key) || !/[a-z]{2}/.test(key)) continue;
-      items.push({ label, amount });
+      if (amount > 0 && !table) amounts.push(amount);
+      if (afterTotal || table || RECEIPT_SKIP.test(key) || !/[a-z]{3}/.test(key)) continue;
+      // Début de ligne : bruit de lecture (« a. », « m5 »…) puis quantité éventuelle.
+      const words = before.replace(/[€*|]+/g, ' ').trim().split(/\s+/);
+      const first = words.findIndex((w) => /[a-z]{3}/i.test(normalizeLabel(w)));
+      const qty = first > 0 && /^\d{1,2}$/.test(words[first - 1]) ? Number(words[first - 1]) : 1;
+      const label = words.slice(Math.max(0, first)).join(' ');
+      items.push({ label: qty > 1 ? `${qty} × ${label}` : label, amount });
     }
     const total = totals.length ? Math.max(...totals) : amounts.length ? Math.max(...amounts) : 0;
     return { total, items: items.filter((it) => it.amount <= total) };
