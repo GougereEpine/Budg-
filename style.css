@@ -1243,3 +1243,66 @@ textarea,
 .cat-edit > :nth-child(5) {
   grid-area: del;
 }
+
+.fav-chips {
+  margin: -4px 0 12px;
+}
+
+.fav-chips .chip {
+  font-size: 0.85rem;
+}
+
+/* Catégorie devinée : léger surlignage pour qu'on la remarque. */
+select.guessed {
+  border-color: var(--a);
+}
+
+/* ---------- Glisser pour supprimer ---------- */
+.list {
+  overflow: hidden;
+}
+
+.item {
+  position: relative;
+  transition: transform 0.15s ease-out;
+}
+
+.item.swiping {
+  transition: none;
+}
+
+.item.swiping::after {
+  content: '🗑️ Supprimer';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: 140px;
+  display: flex;
+  align-items: center;
+  padding-left: 16px;
+  background: var(--over);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+#toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#toast[hidden] {
+  display: none;
+}
+
+.toast-btn {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}

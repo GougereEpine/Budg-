@@ -125,6 +125,18 @@
     toastTimer = setTimeout(() => (toastEl.hidden = true), 3000);
   }
 
+  // Message avec un bouton (ex. « Annuler »), visible 5 secondes.
+  function toastAction(msg, label, action) {
+    toastEl.innerHTML = `<span>${esc(msg)}</span><button type="button" class="toast-btn">${esc(label)}</button>`;
+    toastEl.hidden = false;
+    toastEl.querySelector('button').onclick = () => {
+      toastEl.hidden = true;
+      action();
+    };
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (toastEl.hidden = true), 5000);
+  }
+
   function errorMessage(e) {
     const msg = (e && e.message) || String(e);
     if (/Invalid login credentials/i.test(msg)) return 'E-mail ou mot de passe incorrect';
@@ -414,9 +426,17 @@
     const titles = existing
       ? ['Modifier la dépense', "Modifier l'entrée d'argent"]
       : ['Nouvelle dépense', "Nouvelle entrée d'argent"];
+    const favs = existing || preset.label ? [] : L.favorites(S.state, today());
     openModal(
       titles[e.isIncome ? 1 : 0],
       `
+      ${
+        favs.length
+          ? `<div class="chips fav-chips">${favs
+              .map((f, i) => `<button type="button" class="chip" data-fav="${i}">${esc(category(f.categoryId).icon)} ${esc(f.label)} · ${euro(f.amount)}</button>`)
+              .join('')}</div>`
+          : ''
+      }
       <div class="seg" style="margin-bottom:14px">
         <label><input type="radio" name="kind" value="expense" ${e.isIncome ? '' : 'checked'}><span>💳 Dépense</span></label>
         <label><input type="radio" name="kind" value="income" ${e.isIncome ? 'checked' : ''}><span>💰 Entrée d'argent</span></label>
@@ -464,20 +484,61 @@
           // Nouvelle dépense : on reprend la répartition de la dernière dépense de la catégorie
           // (ex. « Transport » toujours selon l'usage de la voiture).
           if (!existing) {
-            form.categoryId.onchange = () => {
-              const last = [...S.state.expenses]
-                .filter((x) => x.categoryId === form.categoryId.value)
-                .sort((x, y) => (x.date < y.date ? 1 : -1))[0];
-              if (!last) return;
+            // Remplit la répartition à partir d'une dépense modèle.
+            const applySplit = (model) => {
               const d = S.state.defaultSplit;
-              form.splitMode.value = last.byUsage
-                ? 'car'
-                : last.split === d ? 'default' : last.split === 50 ? '50' : last.split === 100 ? 'a' : last.split === 0 ? 'b' : 'custom';
-              if (!form.splitMode.value) form.splitMode.value = 'custom';
-              form.splitCustom.value = last.split;
-              form.customUnit.value = 'pct';
+              if (model.shareA != null && !model.byUsage) {
+                form.splitMode.value = 'custom';
+                form.customUnit.value = 'eur';
+                form.shareCustom.value = amountValue(model.shareA);
+              } else {
+                form.splitMode.value = model.byUsage
+                  ? 'car'
+                  : model.split === d ? 'default' : model.split === 50 ? '50' : model.split === 100 ? 'a' : model.split === 0 ? 'b' : 'custom';
+                if (!form.splitMode.value) form.splitMode.value = 'custom';
+                form.splitCustom.value = model.split;
+                form.customUnit.value = 'pct';
+              }
               sync();
             };
+            const categoryChanged = () => {
+              const last = [...S.state.expenses]
+                .filter((x) => x.categoryId === form.categoryId.value && !x.isIncome)
+                .sort((x, y) => (x.date < y.date ? 1 : -1))[0];
+              if (last) applySplit(last);
+            };
+            // Catégorie choisie à la main : on ne la devine plus.
+            let categoryTouched = Boolean(preset.categoryId);
+            form.categoryId.onchange = () => {
+              categoryTouched = true;
+              categoryChanged();
+            };
+            // Catégorie devinée d'après le libellé (« Lidl » → Courses).
+            form.label.addEventListener('input', () => {
+              if (categoryTouched) return;
+              const guess = L.guessCategory(S.state, form.label.value);
+              if (guess && guess !== form.categoryId.value) {
+                form.categoryId.value = guess;
+                form.categoryId.classList.add('guessed');
+                categoryChanged();
+              }
+            });
+            // Favoris : un toucher remplit tout, il reste à vérifier le montant.
+            form.querySelectorAll('[data-fav]').forEach((b) => {
+              b.onclick = () => {
+                const f = favs[Number(b.dataset.fav)];
+                form.label.value = f.label;
+                form.amount.value = amountValue(f.amount);
+                if (f.categoryId) form.categoryId.value = f.categoryId;
+                categoryTouched = true;
+                const payerInput = form.querySelector(`[name=payer][value=${f.payer}]`);
+                if (payerInput) payerInput.checked = true;
+                applySplit(f);
+                form.querySelectorAll('[data-fav]').forEach((x) => x.classList.toggle('active', x === b));
+                form.amount.focus();
+                form.amount.select();
+              };
+            });
             form.amount.focus();
           }
         },
@@ -1191,7 +1252,7 @@
 
     const recent = [...state.expenses]
       .sort((x, y) => (x.date === y.date ? 0 : x.date < y.date ? 1 : -1))
-      .slice(0, 5);
+      .slice(0, 3);
 
     view.innerHTML = `
       <div class="topbar">
@@ -1215,7 +1276,8 @@
       <div class="card">
         ${whoPaidHtml(cur, ui.hideFixedHome)}
       </div>
-      <h2>Dernières dépenses</h2>
+      <div class="topbar"><h2>Dernières dépenses</h2>
+        ${state.expenses.length > 3 ? '<button class="btn link" data-goto="expenses">Tout voir ›</button>' : ''}</div>
       <div class="card list">
         ${recent.length ? recent.map(expenseItem).join('') : '<div class="empty">Aucune dépense pour l\'instant.<br>Appuyez sur ＋ pour commencer.</div>'}
       </div>`;
@@ -2027,6 +2089,77 @@
     window.scrollTo(0, 0);
     render();
   });
+
+  // ---------- Glisser vers la gauche pour supprimer ----------
+
+  // Élément supprimable sous le doigt : dépense ou remboursement saisi à la main
+  // (pas les occurrences de charges fixes), ou article de la liste de courses.
+  function swipeTarget(el) {
+    const item = el.closest('.item');
+    if (!item || !view.contains(item)) return null;
+    const d = item.dataset;
+    if (d.expense && !d.expense.includes('@')) return { item, kind: 'expenses', id: d.expense };
+    if (d.transfer && !d.transfer.includes('@')) return { item, kind: 'transfers', id: d.transfer };
+    if (d.shop) return { item, kind: 'shopping', id: d.shop };
+    return null;
+  }
+
+  let swipe = null;
+  let swallowClick = false;
+  view.addEventListener(
+    'touchstart',
+    (ev) => {
+      const t = swipeTarget(ev.target);
+      swipe = t && { ...t, x: ev.touches[0].clientX, y: ev.touches[0].clientY, dx: 0, horizontal: null };
+    },
+    { passive: true }
+  );
+  view.addEventListener(
+    'touchmove',
+    (ev) => {
+      if (!swipe) return;
+      const dx = ev.touches[0].clientX - swipe.x;
+      const dy = ev.touches[0].clientY - swipe.y;
+      if (swipe.horizontal == null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) swipe.horizontal = Math.abs(dx) > Math.abs(dy);
+      if (!swipe.horizontal) return;
+      swipe.dx = Math.min(0, dx);
+      swipe.item.classList.add('swiping');
+      swipe.item.style.transform = `translateX(${swipe.dx}px)`;
+    },
+    { passive: true }
+  );
+  view.addEventListener('touchend', () => {
+    if (!swipe) return;
+    const { item, kind, id, dx, horizontal } = swipe;
+    swipe = null;
+    if (!horizontal) return;
+    swallowClick = true;
+    setTimeout(() => (swallowClick = false), 300);
+    if (dx > -90) {
+      item.style.transform = '';
+      item.classList.remove('swiping');
+      return;
+    }
+    item.style.transform = 'translateX(-110%)';
+    const previous = S.state[kind].find((x) => x.id === id);
+    if (!previous) return;
+    const label = kind === 'shopping' ? previous.label : kind === 'transfers' ? 'Remboursement' : previous.label;
+    setTimeout(() => {
+      run(S.remove(kind, id));
+      toastAction(`« ${label} » supprimé`, 'Annuler', () => run(S.save(kind, { ...previous }), 'Restauré'));
+    }, 150);
+  });
+  // Un glissement ne doit pas aussi ouvrir la fiche.
+  view.addEventListener(
+    'click',
+    (ev) => {
+      if (swallowClick) {
+        ev.stopPropagation();
+        ev.preventDefault();
+      }
+    },
+    true
+  );
 
   // Délégation des clics dans la vue.
   view.addEventListener('click', (ev) => {

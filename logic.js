@@ -271,6 +271,64 @@
     return { usage, expenses, total, paid, share };
   }
 
+  // Libellé simplifié pour comparer : minuscules, sans accents, chiffres ni ponctuation.
+  function normalizeLabel(label) {
+    return String(label || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z ]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // Catégorie la plus probable pour un libellé, d'après les dépenses passées :
+  // même libellé (poids 3) ou même premier mot (poids 1). null si rien de sûr.
+  function guessCategory(state, label) {
+    const key = normalizeLabel(label);
+    if (key.length < 2) return null;
+    const first = key.split(' ')[0];
+    const scores = {};
+    for (const e of state.expenses) {
+      if (e.isIncome || !e.categoryId) continue;
+      const k = normalizeLabel(e.label);
+      const w = k === key ? 3 : first.length >= 3 && k.split(' ')[0] === first ? 1 : 0;
+      if (w) scores[e.categoryId] = (scores[e.categoryId] || 0) + w;
+    }
+    let best = null;
+    for (const [id, score] of Object.entries(scores)) if (!best || score > best.score) best = { id, score };
+    return best ? best.id : null;
+  }
+
+  // Dépenses fréquentes (au moins 2 fois en 4 mois) à proposer en raccourci,
+  // avec les réglages de la dernière occurrence.
+  function favorites(state, today, n = 5) {
+    const since = addMonths(monthKey(today), -4);
+    const groups = {};
+    for (const e of state.expenses) {
+      if (e.isIncome || monthKey(e.date) < since) continue;
+      const k = normalizeLabel(e.label);
+      if (!k) continue;
+      const g = groups[k] || (groups[k] = { count: 0, last: e });
+      g.count++;
+      if (e.date >= g.last.date) g.last = e;
+    }
+    return Object.values(groups)
+      .filter((g) => g.count >= 2)
+      .sort((x, y) => y.count - x.count || (x.last.date < y.last.date ? 1 : -1))
+      .slice(0, n)
+      .map(({ count, last }) => ({
+        count,
+        label: last.label,
+        amount: last.amount,
+        payer: last.payer,
+        categoryId: last.categoryId,
+        split: last.split,
+        shareA: last.shareA,
+        byUsage: last.byUsage,
+      }));
+  }
+
   // Répartition proportionnelle aux revenus (en % pour a), arrondie à l'unité.
   function splitFromIncomes(incomeA, incomeB) {
     const sum = incomeA + incomeB;
@@ -426,6 +484,9 @@
 
   const api = {
     analyzeMonth,
+    normalizeLabel,
+    guessCategory,
+    favorites,
     monthContributions,
     carUsageFor,
     carSummary,

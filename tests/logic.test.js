@@ -359,3 +359,29 @@ test('la fonction de notification utilise la même copie de logic.js', () => {
     'Recopier logic.js dans supabase/functions/budg-notify/ puis redéployer la fonction'
   );
 });
+
+test('catégorie devinée d\'après le libellé', () => {
+  const e = (id, label, categoryId, date = '2026-10-01') => ({ id, date, label, amount: 1000, payer: 'a', categoryId, split: 50 });
+  const s = baseState({
+    expenses: [e('1', 'Lidl', 'courses'), e('2', 'Lidl Lille', 'courses'), e('3', 'Resto japonais', 'resto'), e('4', 'Resto italien', 'resto'), e('5', 'Lidl', 'loisirs')],
+  });
+  assert.equal(L.guessCategory(s, 'lidl'), 'courses'); // 2 × exact (3) + 1 premier mot vs 1 × exact
+  assert.equal(L.guessCategory(s, 'Resto chinois'), 'resto'); // même premier mot
+  assert.equal(L.guessCategory(s, 'Boulangerie'), null);
+  assert.equal(L.normalizeLabel('  Électricité  EDF 2026!'), 'electricite edf');
+});
+
+test('favoris : dépenses fréquentes des 4 derniers mois', () => {
+  const e = (id, label, amount, date) => ({ id, date, label, amount, payer: 'b', categoryId: 'courses', split: 50 });
+  const s = baseState({
+    expenses: [
+      e('1', 'Lidl', 3000, '2026-09-02'), e('2', 'lidl', 4500, '2026-10-12'), e('3', 'Lidl', 3900, '2026-10-05'),
+      e('4', 'Boulangerie', 450, '2026-10-01'), e('5', 'Boulangerie', 520, '2026-10-20'),
+      e('6', 'Ciné', 2400, '2026-10-03'), // une seule fois
+      e('7', 'Ikea', 9000, '2026-01-10'), e('8', 'Ikea', 9000, '2026-02-10'), // trop ancien
+    ],
+  });
+  const fav = L.favorites(s, '2026-10-26');
+  assert.deepEqual(fav.map((f) => [f.label, f.count, f.amount]), [['lidl', 3, 4500], ['Boulangerie', 2, 520]]);
+  assert.equal(fav[0].payer, 'b');
+});
