@@ -780,7 +780,10 @@ dialog {
   width: 100%;
   max-width: 560px;
   max-height: 92vh;
+  /* Hauteur réellement visible (barres de Safari comprises), si le navigateur la connaît. */
+  max-height: 92dvh;
   overflow-x: hidden;
+  overscroll-behavior: contain;
   margin: auto auto 0;
   background: var(--bg);
   color: var(--text);
