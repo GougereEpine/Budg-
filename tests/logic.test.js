@@ -499,3 +499,34 @@ RENDU                   0,00`;
   // Shampoing pour a, dessert pour b : le reste est partagé.
   assert.deepEqual(L.receiptExtras(r.items, ['ab', 'ab', 'a', 'b']), { extraA: 429, extraB: 235 });
 });
+
+test('ticket de caisse : vraie photo de restaurant (texte tel que lu par Tesseract)', () => {
+  const text = `ve 4 13
+A LE CABANON
+ue REG NO CAISSE 00 SERV. 1 :
+us 04/10/2026 03293 18:31
+0 TABLE:DO
+m5 1 GODEFROY 50CL B.00£ À
+1 8 CUVEE DES TROLES 2801 32.00€ À
+a. 2 TAGLIATA BOEUF 46.00€ B
+. 1 CUISSE DE CANARD 20.00€ B
+4 1 BALLE DE MATCH 5.00€ À
+à. 13 PIECES
+75 HTVA TAUX TVA TOTALe
+.) 37.198 21.00A — T.8B1€ 45,00€
+© 58.93e 12.008 — 7.07 BB.00e
+EU. SOLDE 111.00€
+>, TICKET PRO FORMA
+4 TEL: 061/467 400 0,
+10 PLU HASH: 2f9ba781 Là`;
+  const r = L.parseReceipt(text);
+  assert.equal(r.total, 11100);
+  assert.deepEqual(r.items.map((i) => [i.label, i.amount]), [
+    ['GODEFROY 50CL', 800],
+    ['8 × CUVEE DES TROLES 2801', 3200],
+    ['2 × TAGLIATA BOEUF', 4600],
+    ['CUISSE DE CANARD', 2000],
+    ['BALLE DE MATCH', 500],
+  ]);
+  assert.equal(r.items.reduce((s, i) => s + i.amount, 0), r.total);
+});
