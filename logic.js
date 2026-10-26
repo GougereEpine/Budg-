@@ -1,0 +1,576 @@
+// Cœur de calcul de Budg' : fonctions pures, sans accès au DOM.
+// Tous les montants sont en centimes (entiers) pour éviter les erreurs d'arrondi.
+// Le partage d'une dépense est exprimé par `split` = pourcentage à la charge de la personne "a".
+(function (root) {
+  'use strict';
+
+  function pad(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  function monthKey(date) {
+    return date.slice(0, 7);
+  }
+
+  function todayISO(now) {
+    const d = now || new Date();
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  function addMonths(month, delta) {
+    const [y, m] = month.split('-').map(Number);
+    const idx = y * 12 + (m - 1) + delta;
+    return `${Math.floor(idx / 12)}-${pad((idx % 12) + 1)}`;
+  }
+
+  function monthsRange(start, end) {
+    const out = [];
+    for (let m = start; m <= end; m = addMonths(m, 1)) out.push(m);
+    return out;
+  }
+
+  function daysInMonth(month) {
+    const [y, m] = month.split('-').map(Number);
+    return new Date(y, m, 0).getDate();
+  }
+
+  // "12,50" / "12.5" / "1 200" -> centimes. Renvoie NaN si invalide.
+  function parseAmount(input) {
+    const s = String(input).replace(/[\s\u00a0€]/g, '').replace(',', '.');
+    if (!/^\d+(\.\d{0,2})?$/.test(s)) return NaN;
+    return Math.round(parseFloat(s) * 100);
+  }
+
+  function shareOf(amount, split) {
+    const a = Math.round((amount * split) / 100);
+    return { a, b: amount - a };
+  }
+
+  // Parts d'une dépense : montant précis pour a (`shareA`, en centimes) s'il est
+  // renseigné, sinon le pourcentage `split`. `extraA` / `extraB` : articles pour
+  // une seule personne (shampoing, dessert…) retirés avant le partage.
+  function sharesOf(e) {
+    if (e.shareA != null && !e.byUsage) return { a: e.shareA, b: e.amount - e.shareA };
+    const extraA = e.extraA || 0;
+    const extraB = e.extraB || 0;
+    const s = shareOf(e.amount - extraA - extraB, e.split);
+    return { a: s.a + extraA, b: s.b + extraB };
+  }
+
+  // Usage de la voiture : % d'utilisation par a pour un mois. Si le mois n'est pas
+  // renseigné, on reprend le dernier mois renseigné avant, sinon la répartition
+  // par défaut du couple. `isSet` indique si le mois lui-même a été renseigné.
+  function carUsageFor(state, month) {
+    const usage = state.carUsage || {};
+    if (usage[month] != null) return { split: usage[month], isSet: true, from: month };
+    const before = Object.keys(usage).filter((m) => m < month).sort();
+    if (before.length) {
+      const m = before[before.length - 1];
+      return { split: usage[m], isSet: false, from: m };
+    }
+    return { split: state.defaultSplit, isSet: false, from: null };
+  }
+
+  // Une dépense « selon l'usage de la voiture » prend le % du mois où elle a lieu.
+  function withUsage(state, e) {
+    return e.byUsage ? { ...e, split: carUsageFor(state, monthKey(e.date)).split } : e;
+  }
+
+  // Une entrée d'argent (remboursement EDF, d'assurance…) est une dépense en
+  // négatif : elle réduit la catégorie, et la personne qui l'a reçue doit sa
+  // part à l'autre.
+  function signed(e) {
+    if (!e.isIncome) return e;
+    return {
+      ...e,
+      amount: -e.amount,
+      shareA: e.shareA == null ? e.shareA : -e.shareA,
+      extraA: -(e.extraA || 0),
+      extraB: -(e.extraB || 0),
+    };
+  }
+
+  // Espace perso : une dépense, un abonnement ou une catégorie avec `owner`
+  // ('a' ou 'b') n'appartient qu'à cette personne et reste hors des comptes du couple.
+  function shared(list) {
+    return (list || []).filter((x) => !x.owner);
+  }
+
+  // Vue « perso » de `p`, au même format que l'état du couple : ses dépenses et
+  // abonnements perso (entièrement à sa charge), ses catégories perso et celles
+  // du couple (sans budget). Les calculs habituels s'y appliquent tels quels.
+  function personalState(state, p) {
+    const mine = (list) =>
+      (list || [])
+        .filter((x) => x.owner === p)
+        .map((x) => ({ ...x, owner: null, personal: p, payer: p, split: p === 'a' ? 100 : 0, shareA: null, byUsage: false, extraA: 0, extraB: 0 }));
+    const cats = (state.categories || [])
+      .filter((c) => c.owner === p)
+      .map((c) => ({ ...c, owner: null, personal: p }))
+      .concat(shared(state.categories).map((c) => ({ ...c, budget: 0, period: 'month' })));
+    return { ...state, expenses: mine(state.expenses), recurring: mine(state.recurring), categories: cats, transfers: [], recurringTransfers: [] };
+  }
+
+  // Ce que `p` dépense vraiment sur un mois : sa part des dépenses du couple
+  // plus ses dépenses perso.
+  function personalTotal(state, p, month) {
+    const couple = monthSummary(state, month).share[p];
+    const perso = monthSummary(personalState(state, p), month).total;
+    return { couple, perso, total: couple + perso };
+  }
+
+  // Génère les occurrences mensuelles des charges fixes jusqu'au mois `upTo` inclus.
+  function expandRecurring(recurring, upTo) {
+    const out = [];
+    for (const r of recurring) {
+      const last = r.endMonth && r.endMonth < upTo ? r.endMonth : upTo;
+      if (r.startMonth > last) continue;
+      for (const month of monthsRange(r.startMonth, last)) {
+        const day = Math.min(r.day || 1, daysInMonth(month));
+        out.push({
+          id: `${r.id}@${month}`,
+          recurringId: r.id,
+          date: `${month}-${pad(day)}`,
+          label: r.label,
+          amount: r.amount,
+          payer: r.payer,
+          categoryId: r.categoryId,
+          split: r.split,
+          shareA: r.shareA,
+          byUsage: Boolean(r.byUsage),
+          ...(r.personal ? { personal: r.personal } : {}),
+        });
+      }
+    }
+    return out;
+  }
+
+  // Ce que `from` doit à l'autre au titre des charges fixes d'un mois donné
+  // (sa part moins ce qu'il/elle a déjà payé soi-même), jamais négatif.
+  function fixedChargesDebt(state, month, from) {
+    const rs = recurringSummary(state, month);
+    return Math.max(0, rs.share[from] - rs.paid[from]);
+  }
+
+  // Occurrences mensuelles des remboursements automatiques jusqu'au mois `upTo`.
+  // `auto` = le montant est recalculé chaque mois à partir des charges fixes.
+  function expandRecurringTransfers(state, upTo) {
+    const out = [];
+    for (const r of state.recurringTransfers || []) {
+      const last = r.endMonth && r.endMonth < upTo ? r.endMonth : upTo;
+      if (r.startMonth > last) continue;
+      for (const month of monthsRange(r.startMonth, last)) {
+        const amount = r.auto ? fixedChargesDebt(state, month, r.from) : r.amount;
+        if (!(amount > 0)) continue;
+        const day = Math.min(r.day || 1, daysInMonth(month));
+        out.push({
+          id: `${r.id}@${month}`,
+          recurringTransferId: r.id,
+          date: `${month}-${pad(day)}`,
+          from: r.from,
+          to: r.to,
+          amount,
+          note: r.note || '',
+        });
+      }
+    }
+    return out;
+  }
+
+  function allTransfers(state, upTo) {
+    return state.transfers
+      .filter((t) => monthKey(t.date) <= upTo)
+      .concat(expandRecurringTransfers(state, upTo));
+  }
+
+  // Dépenses ponctuelles + occurrences des charges fixes, jusqu'au mois `upTo`.
+  function allExpenses(state, upTo) {
+    const real = shared(state.expenses).filter((e) => monthKey(e.date) <= upTo);
+    return real.concat(expandRecurring(shared(state.recurring), upTo)).map((e) => signed(withUsage(state, e)));
+  }
+
+  // Solde du couple : net.a > 0 signifie que b doit net.a à a.
+  // Toutes les dépenses saisies comptent (même datées plus tard) ; les charges
+  // fixes et remboursements automatiques ne comptent que jusqu'au mois `upTo`
+  // (en général le mois en cours).
+  function computeBalance(state, upTo) {
+    const net = { a: 0, b: 0 };
+    for (const raw of shared(state.expenses).concat(expandRecurring(shared(state.recurring), upTo))) {
+      const e = signed(withUsage(state, raw));
+      const s = sharesOf(e);
+      net[e.payer] += e.amount;
+      net.a -= s.a;
+      net.b -= s.b;
+    }
+    for (const t of state.transfers.concat(expandRecurringTransfers(state, upTo))) {
+      net[t.from] += t.amount;
+      net[t.to] -= t.amount;
+    }
+    if (net.a === 0) return { net, debtor: null, creditor: null, amount: 0 };
+    return net.a > 0
+      ? { net, debtor: 'b', creditor: 'a', amount: net.a }
+      : { net, debtor: 'a', creditor: 'b', amount: net.b };
+  }
+
+  function monthExpenses(state, month) {
+    return allExpenses(state, month)
+      .filter((e) => monthKey(e.date) === month)
+      .sort((x, y) => (x.date < y.date ? 1 : x.date > y.date ? -1 : 0));
+  }
+
+  function monthSummary(state, month) {
+    const expenses = monthExpenses(state, month);
+    const byCategory = {};
+    const paid = { a: 0, b: 0 };
+    const share = { a: 0, b: 0 };
+    let total = 0;
+    for (const e of expenses) {
+      total += e.amount;
+      paid[e.payer] += e.amount;
+      const s = sharesOf(e);
+      share.a += s.a;
+      share.b += s.b;
+      byCategory[e.categoryId] = (byCategory[e.categoryId] || 0) + e.amount;
+    }
+    const categories = shared(state.categories).map((c) => ({
+      ...c,
+      spent: byCategory[c.id] || 0,
+      remaining: c.budget - (byCategory[c.id] || 0),
+    }));
+    const budgetTotal = shared(state.categories).reduce((sum, c) => sum + (c.budget || 0), 0);
+    return { month, expenses, total, paid, share, categories, budgetTotal };
+  }
+
+  // Coût mensuel des charges fixes actives sur un mois donné.
+  function recurringSummary(state, month) {
+    const active = shared(state.recurring).filter(
+      (r) => r.startMonth <= month && (!r.endMonth || r.endMonth >= month)
+    );
+    const paid = { a: 0, b: 0 };
+    const share = { a: 0, b: 0 };
+    let total = 0;
+    for (const r of active) {
+      total += r.amount;
+      paid[r.payer] += r.amount;
+      const s = sharesOf(r.byUsage ? { ...r, split: carUsageFor(state, month).split } : r);
+      share.a += s.a;
+      share.b += s.b;
+    }
+    return { active, total, paid, share };
+  }
+
+  // Qui a réellement financé le mois : dépenses payées directement, plus les
+  // virements donnés, moins les virements reçus (remboursements auto compris).
+  // `variableOnly` : sans les charges fixes ni les remboursements automatiques
+  // (qui servent à les couvrir) ; les remboursements saisis à la main restent.
+  function monthContributions(state, month, { variableOnly = false } = {}) {
+    const paid = { a: 0, b: 0 };
+    const share = { a: 0, b: 0 };
+    for (const e of monthExpenses(state, month)) {
+      if (variableOnly && e.recurringId) continue;
+      paid[e.payer] += e.amount;
+      const sh = sharesOf(e);
+      share.a += sh.a;
+      share.b += sh.b;
+    }
+    const given = { a: 0, b: 0 };
+    for (const t of allTransfers(state, month)) {
+      if (monthKey(t.date) !== month || (variableOnly && t.recurringTransferId)) continue;
+      given[t.from] += t.amount;
+    }
+    const funded = {
+      a: paid.a + given.a - given.b,
+      b: paid.b + given.b - given.a,
+    };
+    return { paid, given, funded, share, diffA: funded.a - share.a };
+  }
+
+  // Dépenses du mois réparties selon l'usage de la voiture (essence, péage…).
+  function carSummary(state, month) {
+    const usage = carUsageFor(state, month);
+    const expenses = monthExpenses(state, month).filter((e) => e.byUsage);
+    const total = expenses.reduce((sum, e) => sum + e.amount, 0);
+    const paid = { a: 0, b: 0 };
+    const share = { a: 0, b: 0 };
+    for (const e of expenses) {
+      paid[e.payer] += e.amount;
+      const s = sharesOf(e);
+      share.a += s.a;
+      share.b += s.b;
+    }
+    return { usage, expenses, total, paid, share };
+  }
+
+  // Libellé simplifié pour comparer : minuscules, sans accents, chiffres ni ponctuation.
+  function normalizeLabel(label) {
+    return String(label || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z ]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // Catégorie la plus probable pour un libellé, d'après les dépenses passées :
+  // même libellé (poids 3) ou même premier mot (poids 1). null si rien de sûr.
+  function guessCategory(state, label) {
+    const key = normalizeLabel(label);
+    if (key.length < 2) return null;
+    const first = key.split(' ')[0];
+    const scores = {};
+    for (const e of shared(state.expenses)) {
+      if (e.isIncome || !e.categoryId) continue;
+      const k = normalizeLabel(e.label);
+      const w = k === key ? 3 : first.length >= 3 && k.split(' ')[0] === first ? 1 : 0;
+      if (w) scores[e.categoryId] = (scores[e.categoryId] || 0) + w;
+    }
+    let best = null;
+    for (const [id, score] of Object.entries(scores)) if (!best || score > best.score) best = { id, score };
+    return best ? best.id : null;
+  }
+
+  // Dépenses fréquentes (au moins 2 fois en 4 mois) à proposer en raccourci,
+  // avec les réglages de la dernière occurrence.
+  function favorites(state, today, n = 5) {
+    const since = addMonths(monthKey(today), -4);
+    const groups = {};
+    for (const e of shared(state.expenses)) {
+      if (e.isIncome || monthKey(e.date) < since) continue;
+      const k = normalizeLabel(e.label);
+      if (!k) continue;
+      const g = groups[k] || (groups[k] = { count: 0, last: e });
+      g.count++;
+      if (e.date >= g.last.date) g.last = e;
+    }
+    return Object.values(groups)
+      .filter((g) => g.count >= 2)
+      .sort((x, y) => y.count - x.count || (x.last.date < y.last.date ? 1 : -1))
+      .slice(0, n)
+      .map(({ count, last }) => ({
+        count,
+        label: last.label,
+        amount: last.amount,
+        payer: last.payer,
+        categoryId: last.categoryId,
+        split: last.split,
+        shareA: last.shareA,
+        byUsage: last.byUsage,
+      }));
+  }
+
+  // Projet d'épargne : déjà mis de côté (total et par personne), % de l'objectif,
+  // et ce qu'il faut mettre chaque mois pour tenir l'échéance (mois inclus).
+  function goalProgress(state, goal, today) {
+    const contribs = (state.goalContributions || []).filter((c) => c.goalId === goal.id);
+    const byPerson = { a: 0, b: 0 };
+    for (const c of contribs) byPerson[c.person] += c.amount;
+    const saved = byPerson.a + byPerson.b;
+    const remaining = Math.max(0, goal.target - saved);
+    let monthsLeft = null;
+    let perMonth = null;
+    if (goal.deadline) {
+      const cur = monthKey(today);
+      monthsLeft = goal.deadline < cur ? 0 : monthsRange(cur, goal.deadline).length;
+      perMonth = monthsLeft > 0 ? Math.ceil(remaining / monthsLeft) : remaining;
+    }
+    return {
+      saved,
+      byPerson,
+      remaining,
+      pct: Math.min(100, Math.round((saved / goal.target) * 100)),
+      done: saved >= goal.target,
+      monthsLeft,
+      perMonth,
+    };
+  }
+
+  // Répartition proportionnelle aux revenus (en % pour a), arrondie à l'unité.
+  function splitFromIncomes(incomeA, incomeB) {
+    const sum = incomeA + incomeB;
+    if (!(sum > 0)) return 50;
+    return Math.round((incomeA / sum) * 100);
+  }
+
+  // Analyse d'un mois : % du budget consommé, projection de fin de mois au rythme
+  // actuel, comparaison avec la moyenne des 3 mois précédents, et alertes.
+  // `today` (YYYY-MM-DD) sert à savoir quelle part du mois est écoulée.
+  function analyzeMonth(state, month, today) {
+    const summary = monthSummary(state, month);
+    const curMonth = monthKey(today);
+    const dim = daysInMonth(month);
+    const elapsed = month < curMonth ? dim : month > curMonth ? 0 : Number(today.slice(8, 10));
+    const progress = elapsed / dim; // part du mois écoulée (0..1)
+
+    const prevMonths = [1, 2, 3].map((i) => addMonths(month, -i));
+    const prevSummaries = prevMonths.map((m) => monthSummary(state, m));
+    // On ne compte que les mois où il y a eu au moins une dépense.
+    const withData = prevSummaries.filter((s) => s.total > 0);
+
+    // Les charges fixes tombent en début de mois : on ne les projette pas, seules
+    // les dépenses variables suivent le rythme de dépense.
+    const project = (fixed, variable) => {
+      if (progress <= 0) return fixed + variable;
+      if (progress >= 1) return fixed + variable;
+      return fixed + Math.round(variable / progress);
+    };
+
+    // Budgets annuels (vacances…) : on suit l'année civile du mois affiché.
+    const yearMonths = monthsRange(`${month.slice(0, 4)}-01`, month);
+    const yearSummaries = yearMonths.map((m) => (m === month ? summary : monthSummary(state, m)));
+    const monthIndex = yearMonths.length; // 1 = janvier
+
+    const categories = summary.categories.map((c) => {
+      const lastMonth = prevSummaries[0].categories.find((x) => x.id === c.id)?.spent || 0;
+      if (c.period === 'year' && c.budget > 0) {
+        const ytd = yearSummaries.reduce((sum, ys) => sum + (ys.categories.find((x) => x.id === c.id)?.spent || 0), 0);
+        // Cagnotte : 1/12e du budget s'ajoute chaque mois, les dépenses s'en déduisent.
+        const allowance = Math.round((c.budget * monthIndex) / 12);
+        const pct = Math.round((ytd / c.budget) * 100);
+        const avgs = withData.map((ps) => ps.categories.find((x) => x.id === c.id)?.spent || 0);
+        const average = avgs.length ? Math.round(avgs.reduce((x, y) => x + y, 0) / avgs.length) : null;
+        return {
+          ...c,
+          annual: true,
+          fixed: 0,
+          variable: c.spent,
+          ytd,
+          allowance,
+          available: allowance - ytd,
+          pct,
+          projected: c.spent,
+          projectedPct: null,
+          average,
+          lastMonth,
+          vsAverage: average ? Math.round(((c.spent - average) / average) * 100) : null,
+          level: ytd > c.budget ? 'over' : pct >= 90 ? 'warn' : 'ok',
+        };
+      }
+      let fixed = 0;
+      for (const e of summary.expenses) {
+        if (e.categoryId === c.id && e.recurringId) fixed += e.amount;
+      }
+      const variable = c.spent - fixed;
+      const projected = project(fixed, variable);
+      const avgs = withData.map((s) => s.categories.find((x) => x.id === c.id)?.spent || 0);
+      const average = avgs.length ? Math.round(avgs.reduce((x, y) => x + y, 0) / avgs.length) : null;
+      const pct = c.budget > 0 ? Math.round((c.spent / c.budget) * 100) : null;
+      const projectedPct = c.budget > 0 ? Math.round((projected / c.budget) * 100) : null;
+
+      let level = 'ok';
+      if (c.budget > 0) {
+        if (c.spent > c.budget) level = 'over';
+        else if (pct >= 90 || (progress < 1 && projectedPct > 100)) level = 'warn';
+      }
+      return {
+        ...c,
+        fixed,
+        variable,
+        pct,
+        projected,
+        projectedPct,
+        average,
+        lastMonth,
+        vsAverage: average ? Math.round(((c.spent - average) / average) * 100) : null,
+        level,
+      };
+    });
+
+    const alerts = [];
+    for (const c of categories) {
+      if (c.annual) {
+        if (c.level === 'over') alerts.push({ level: 'over', annual: true, categoryId: c.id, pct: c.pct, excess: c.ytd - c.budget });
+        else if (c.level === 'warn') alerts.push({ level: 'warn', annual: true, categoryId: c.id, pct: c.pct });
+        continue;
+      }
+      if (c.level === 'over') {
+        alerts.push({
+          level: 'over',
+          categoryId: c.id,
+          pct: c.pct,
+          excess: c.spent - c.budget,
+        });
+      } else if (c.level === 'warn') {
+        alerts.push({
+          level: 'warn',
+          categoryId: c.id,
+          pct: c.pct,
+          projected: c.projected,
+          projectedPct: c.projectedPct,
+        });
+      }
+      // Dépense hors budget (pas d'enveloppe) nettement au-dessus de l'habitude.
+      if (c.budget === 0 && c.average && c.spent > c.average * 1.5 && c.spent - c.average >= 3000) {
+        alerts.push({ level: 'trend', categoryId: c.id, vsAverage: c.vsAverage, average: c.average });
+      }
+    }
+    const order = { over: 0, warn: 1, trend: 2 };
+    alerts.sort((x, y) => order[x.level] - order[y.level] || (y.pct || 0) - (x.pct || 0));
+
+    // Le récapitulatif « Budgets » du mois ne compte que les budgets mensuels.
+    const budgeted = categories.filter((c) => c.budget > 0 && !c.annual);
+    const budgetSpent = budgeted.reduce((s, c) => s + c.spent, 0);
+    const budgetTotal = budgeted.reduce((s, c) => s + c.budget, 0);
+    const fixedTotal = categories.reduce((s, c) => s + c.fixed, 0);
+    const projectedTotal = project(fixedTotal, summary.total - fixedTotal);
+    const prevAverage = withData.length
+      ? Math.round(withData.reduce((s, x) => s + x.total, 0) / withData.length)
+      : null;
+
+    return {
+      ...summary,
+      progress,
+      categories,
+      alerts,
+      budgetSpent,
+      budgetTotal,
+      budgetPct: budgetTotal > 0 ? Math.round((budgetSpent / budgetTotal) * 100) : null,
+      projectedTotal,
+      prevAverage,
+      vsAverage: prevAverage ? Math.round(((summary.total - prevAverage) / prevAverage) * 100) : null,
+      history: [...prevSummaries]
+        .reverse()
+        .concat([summary])
+        .map((s) => {
+          const fixedSum = s.expenses.filter((e) => e.recurringId).reduce((sum, e) => sum + e.amount, 0);
+          return { month: s.month, total: s.total, fixed: fixedSum, variable: s.total - fixedSum };
+        }),
+    };
+  }
+
+  const api = {
+    analyzeMonth,
+    shared,
+    personalState,
+    personalTotal,
+    goalProgress,
+    normalizeLabel,
+    guessCategory,
+    favorites,
+    monthContributions,
+    carUsageFor,
+    carSummary,
+    fixedChargesDebt,
+    expandRecurringTransfers,
+    allTransfers,
+    pad,
+    monthKey,
+    todayISO,
+    addMonths,
+    monthsRange,
+    daysInMonth,
+    parseAmount,
+    shareOf,
+    sharesOf,
+    expandRecurring,
+    allExpenses,
+    computeBalance,
+    monthExpenses,
+    monthSummary,
+    recurringSummary,
+    splitFromIncomes,
+  };
+
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.BudgLogic = api;
+})(typeof self !== 'undefined' ? self : this);

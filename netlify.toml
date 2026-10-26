@@ -1,0 +1,19 @@
+# Site statique : pas de compilation, on publie le dossier tel quel.
+[build]
+  publish = "."
+  command = ""
+
+# Les dépendances ne servent qu'aux tests : pas de navigateur à télécharger.
+[build.environment]
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
+
+# Toujours recharger le code de l'appli (sinon un téléphone peut garder une ancienne version).
+[[headers]]
+  for = "/*.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "no-cache"
