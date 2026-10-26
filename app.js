@@ -2202,6 +2202,9 @@
     const cur = currentMonth();
     const subs = ps.recurring.filter((r) => r.startMonth <= cur && (!r.endMonth || r.endMonth >= cur)).sort((x, y) => y.amount - x.amount);
     const budgets = an.categories.filter((c) => c.personal);
+    // Les abonnements ont leur propre liste : on ne les répète pas dans les dépenses du mois.
+    const oneOff = an.expenses.filter((e) => !e.recurringId);
+    const oneOffTotal = oneOff.reduce((sum, e) => sum + e.amount, 0);
 
     const budgetRow = (c) => {
       const spent = c.annual ? c.ytd : c.spent;
@@ -2256,9 +2259,9 @@
       <div class="card list">
         ${subs.length ? subs.map(subItem).join('') : `<div class="empty">${mine ? 'Téléphone, salle de sport, streaming…' : 'Aucun abonnement perso.'}</div>`}
       </div>
-      <div class="topbar"><h2>Dépenses du mois · ${euro(an.total)}</h2>${add('data-add-perso-exp', 'Ajouter une dépense perso')}</div>
+      <div class="topbar"><h2>Dépenses du mois · ${euro(oneOffTotal)}</h2>${add('data-add-perso-exp', 'Ajouter une dépense perso')}</div>
       <div class="card list">
-        ${an.expenses.length ? an.expenses.map((e) => expenseItem(e, !mine)).join('') : '<div class="empty">Rien ce mois-ci.</div>'}
+        ${oneOff.length ? oneOff.map((e) => expenseItem(e, !mine)).join('') : '<div class="empty">Rien ce mois-ci.</div>'}
       </div>
       <p class="hint" style="text-align:center">${mine ? `Hors du solde et des budgets du couple, sans notification. ${esc(name(other(p)))} peut les consulter ici.` : 'Consultation seule.'}</p>`;
 
