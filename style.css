@@ -1459,11 +1459,3 @@ select.guessed {
   gap: 8px;
   margin: 4px 0 8px;
 }
-
-/* Analyse : Couple / Mon perso / Ma part + perso sur une seule ligne */
-.seg-scope span {
-  font-size: 0.8rem;
-  white-space: nowrap;
-  padding-left: 2px;
-  padding-right: 2px;
-}

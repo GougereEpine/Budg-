@@ -19,7 +19,7 @@
     search: '',
     openFixedGroups: new Set(), // catégories dépliées dans l'onglet Fixes
     persoOf: null, // espace perso affiché ('a' ou 'b'), par défaut le sien
-    scope: 'couple', // Analyse : 'couple', 'perso' ou 'total' (sa part du couple + son perso)
+    scope: 'couple', // Analyse : 'couple' ou 'perso' (sa part des dépenses du couple + son perso)
   };
 
   // Préférences propres à cet appareil (le stockage peut être indisponible).
@@ -2081,18 +2081,19 @@
     const couple = scope === 'couple';
     // Hors charges fixes : elles ont leur onglet.
     const base = L.withoutFixed(S.state);
-    const state = couple ? base : scope === 'perso' ? L.personalState(base, p) : L.totalState(base, p, ui.month);
+    // Perso : sa part de chaque dépense du couple (courses à 50/50 : la moitié) + ses dépenses perso.
+    const state = couple ? base : L.totalState(base, p, ui.month);
     const an = L.analyzeMonth(state, ui.month, today());
     // Seules les catégories du couple (vue Couple) et les catégories perso (autres vues) ont un budget modifiable ici.
     const catAttr = (c) => (couple ? `data-category="${c.id}"` : c.personal && (S.mode !== 'cloud' || p === me()) ? `data-perso-cat="${c.id}"` : '');
     const who = S.mode === 'cloud' && p === me() ? 'moi' : name(p);
     const scopeChips = `
-      <div class="seg seg-scope" style="margin-bottom:12px">
-        ${[['couple', '👥 Couple'], ['perso', '👤 Mon perso'], ['total', '🙋 Ma part + perso']]
+      <div class="seg" style="margin-bottom:12px">
+        ${[['couple', '👥 Couple'], ['perso', '👤 Perso']]
           .map(([v, l]) => `<label><input type="radio" name="scope" value="${v}" ${scope === v ? 'checked' : ''}><span>${l}</span></label>`)
           .join('')}
       </div>
-      ${couple ? '' : `<p class="hint" style="margin:-4px 4px 10px">${scope === 'perso' ? `Seulement les dépenses perso de ${esc(who)}.` : `La part de ${esc(who)} dans chaque dépense du couple (courses à 50/50 : la moitié) + son perso : ce que ${S.mode === 'cloud' && p === me() ? 'tu dépenses' : `${esc(name(p))} dépense`} vraiment.`}${S.mode !== 'cloud' ? ` <button class="btn link" data-scope-person>Voir ${esc(name(other(p)))}</button>` : ''}</p>`}`;
+      ${couple ? '' : `<p class="hint" style="margin:-4px 4px 10px">${S.mode === 'cloud' && p === me() ? 'Ta part' : `La part de ${esc(who)}`} de chaque dépense du couple (courses à 50/50 : la moitié) + ${S.mode === 'cloud' && p === me() ? 'tes' : 'ses'} dépenses perso.${S.mode !== 'cloud' ? ` <button class="btn link" data-scope-person>Voir ${esc(name(other(p)))}</button>` : ''}</p>`}`;
     const isCurrent = ui.month === currentMonth();
     const isPast = ui.month < currentMonth();
 
