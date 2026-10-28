@@ -2087,12 +2087,12 @@
     const catAttr = (c) => (couple ? `data-category="${c.id}"` : c.personal && (S.mode !== 'cloud' || p === me()) ? `data-perso-cat="${c.id}"` : '');
     const who = S.mode === 'cloud' && p === me() ? 'moi' : name(p);
     const scopeChips = `
-      <div class="seg" style="margin-bottom:12px">
-        ${[['couple', '👥 Couple'], ['perso', `👤 Perso`], ['total', '∑ Total']]
+      <div class="seg seg-scope" style="margin-bottom:12px">
+        ${[['couple', '👥 Couple'], ['perso', '👤 Mon perso'], ['total', '🙋 Ma part + perso']]
           .map(([v, l]) => `<label><input type="radio" name="scope" value="${v}" ${scope === v ? 'checked' : ''}><span>${l}</span></label>`)
           .join('')}
       </div>
-      ${couple ? '' : `<p class="hint" style="margin:-4px 4px 10px">${scope === 'perso' ? `Dépenses perso de ${esc(who)}.` : `Part du couple + perso de ${esc(who)} : ce que ${S.mode === 'cloud' && p === me() ? 'tu dépenses' : `${esc(name(p))} dépense`} vraiment.`}${S.mode !== 'cloud' ? ` <button class="btn link" data-scope-person>Voir ${esc(name(other(p)))}</button>` : ''}</p>`}`;
+      ${couple ? '' : `<p class="hint" style="margin:-4px 4px 10px">${scope === 'perso' ? `Seulement les dépenses perso de ${esc(who)}.` : `La part de ${esc(who)} dans chaque dépense du couple (courses à 50/50 : la moitié) + son perso : ce que ${S.mode === 'cloud' && p === me() ? 'tu dépenses' : `${esc(name(p))} dépense`} vraiment.`}${S.mode !== 'cloud' ? ` <button class="btn link" data-scope-person>Voir ${esc(name(other(p)))}</button>` : ''}</p>`}`;
     const isCurrent = ui.month === currentMonth();
     const isPast = ui.month < currentMonth();
 
