@@ -262,6 +262,13 @@ test('espace perso : dépense hors du couple, budget perso et vue totale', async
   // Elle apparaît dans les dernières dépenses de l'accueil, marquée « perso ».
   await page.waitForFunction(() => document.querySelectorAll('#view .card.list [data-expense]').length === 2);
   assert.match(await text(page, '#view .card.list'), /Basic Fit.*👤 perso/);
+  // Et dans l'onglet Dépenses, avec un filtre « Perso ».
+  await page.click('[data-tab=expenses]');
+  assert.match(await text(page, '#view'), /Basic Fit/);
+  await page.click('[data-filter=perso]');
+  assert.match(await text(page, '#view'), /1 opération\(s\) · total dépenses 60 €/);
+  await page.click('[data-filter=all]');
+  await page.click('[data-tab=home]');
 
   // Espace perso : part du couple + perso, budget perso dépassé.
   await page.click('[data-goto=perso]');
