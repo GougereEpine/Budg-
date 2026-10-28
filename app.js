@@ -1711,6 +1711,7 @@
 
     const upTo = currentMonth() > ui.month ? currentMonth() : ui.month;
     let items = L.allExpenses(L.withoutFixed(state), upTo)
+      .concat(myPersoExpenses().filter((e) => L.monthKey(e.date) <= upTo))
       .filter((e) => matches([e.label, category(e.categoryId).name, name(e.payer)], e.amount))
       .map((e) => ({ kind: 'e', date: e.date, data: e }));
     items = items.concat(
@@ -1749,11 +1750,21 @@
     };
   }
 
+  // Ses propres dépenses perso (hors ligne : celles des deux), au format des
+  // dépenses calculées : entrée d'argent en négatif, marquées « perso ».
+  function myPersoExpenses() {
+    return S.state.expenses
+      .filter((e) => e.owner && (S.mode !== 'cloud' || e.owner === me()))
+      .map((e) => ({ ...e, personal: e.owner, amount: e.isIncome ? -e.amount : e.amount }));
+  }
+
   function renderExpenses() {
     if (ui.search.trim()) return renderSearch();
     const state = S.state;
     // Les charges fixes et remboursements automatiques ont leur onglet.
-    const expenses = L.monthExpenses(L.withoutFixed(state), ui.month);
+    const expenses = L.monthExpenses(L.withoutFixed(state), ui.month).concat(
+      myPersoExpenses().filter((e) => L.monthKey(e.date) === ui.month)
+    );
     const transfers = L.allTransfers(L.withoutFixed(state), ui.month).filter((t) => L.monthKey(t.date) === ui.month);
 
     let items = expenses.map((e) => ({ kind: 'e', date: e.date, data: e }));
@@ -1763,6 +1774,7 @@
       if (f === 'all') return true;
       if (f === 'transfers') return it.kind === 't';
       if (it.kind === 't') return false;
+      if (f === 'perso') return Boolean(it.data.personal);
       if (f === 'a' || f === 'b') return it.data.payer === f;
       return it.data.categoryId === f;
     });
@@ -1776,7 +1788,9 @@
       ['a', name('a')],
       ['b', name('b')],
       ['transfers', '💸 Remboursements'],
-      ...sortedCategories()
+      ...(expenses.some((e) => e.personal) ? [['perso', '👤 Perso']] : []),
+      ...[...S.state.categories]
+        .sort((x, y) => x.position - y.position)
         .filter((c) => usedCats.has(c.id))
         .map((c) => [c.id, `${c.icon} ${c.name}`]),
     ];
