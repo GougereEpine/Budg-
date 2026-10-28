@@ -1941,6 +1941,7 @@
                  <div><span class="small muted"><i class="dot a"></i>Part de ${esc(name('a'))}</span><b class="num">${euro(rs.share.a)}</b></div>
                  <div><span class="small muted"><i class="dot b"></i>Part de ${esc(name('b'))}</span><b class="num">${euro(rs.share.b)}</b></div>
                </div>
+               ${persoFixedTotals(cur, rs)}
                <p class="small muted" style="margin:8px 0 0">${balanceText}</p>`
             : ''
         }
@@ -1965,6 +1966,21 @@
     view.querySelectorAll('[data-add-recurring]').forEach((b) => (b.onclick = () => recurringForm(null)));
     view.querySelectorAll('[data-add-rt]').forEach((b) => (b.onclick = () => recurringTransferForm(null)));
     view.querySelectorAll('[data-add-perso-fixed]').forEach((b) => (b.onclick = () => recurringForm(null, { owner: b.dataset.addPersoFixed })));
+  }
+
+  // Ce qui part vraiment chaque mois : sa part des charges du couple + ses fixes perso.
+  function persoFixedTotals(cur, rs) {
+    const people = S.mode === 'cloud' ? [me()] : ['a', 'b'];
+    return people
+      .map((p) => {
+        const perso = S.state.recurring
+          .filter((r) => r.owner === p && r.startMonth <= cur && (!r.endMonth || r.endMonth >= cur))
+          .reduce((sum, r) => sum + r.amount, 0);
+        if (!perso) return '';
+        const who = S.mode === 'cloud' ? ['Ta part', 'tes fixes perso'] : [`Part de ${esc(name(p))}`, 'ses fixes perso'];
+        return `<p class="small" style="margin:8px 0 0">👤 ${who[0]} <b class="num">${euro(rs.share[p])}</b> + ${who[1]} <b class="num">${euro(perso)}</b> = <b class="num">${euro(rs.share[p] + perso)}</b> par mois</p>`;
+      })
+      .join('');
   }
 
   // Charges fixes perso (les siennes ; hors ligne, celles des deux) : à part du total du couple.
